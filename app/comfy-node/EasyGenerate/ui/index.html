@@ -191,6 +191,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
             </div>
             <div id="cFmtBox"><label class="l">Format</label><div class="chips" id="cAspect"></div></div>
             <div id="cDurBox"><label class="l">Länge: <b id="cDurTxt">5 s</b></label><div class="row"><input type="range" id="cDur" min="1" max="10" step="0.5" value="5"></div></div>
+            <div id="cMain"></div>
             <details id="cAdv">
               <summary>Erweitert</summary>
               <div id="cNegBox"><label class="l" for="cNeg">Was soll NICHT vorkommen?</label>
@@ -1485,7 +1486,9 @@ async function renderSpaceForm(s){
   const used = new Set([pf, df, nf, sf].filter(Boolean).map(f => f.i));
   const extra = ep.fields.filter(f => !used.has(f.i) && f.role !== "randomize" && !["image", "video", "audio", "file", "skip"].includes(f.kind));
   const box = $("#cExtra"); box.innerHTML = "";
-  if(extra.length) box.insertAdjacentHTML("beforeend", `<p class="hint" style="margin:14px 0 0">Einstellungen des Space (leer = Standard des Space):</p>`);
+  const main = $("#cMain"); main.innerHTML = "";
+  const isMain = f => /canvas|resolution|aufl|size|aspect|quality|qualit|steps|speed|fast|preset|mode|fps|frames/i.test(f.name + " " + f.label);
+  if(extra.some(f => !isMain(f))) box.insertAdjacentHTML("beforeend", `<p class="hint" style="margin:14px 0 0">Einstellungen des Space (leer = Standard des Space):</p>`);
   for(const f of extra){
     const cur = vals[f.i] ?? f.default;
     const w = document.createElement("div");
@@ -1493,8 +1496,28 @@ async function renderSpaceForm(s){
     if(f.kind === "bool"){ w.innerHTML = `<label class="row" style="gap:8px;margin-top:10px"><input type="checkbox"> ${esc(f.label)}</label>`; inp = w.querySelector("input"); inp.checked = !!cur; inp.onchange = () => { vals[f.i] = inp.checked; saveVals(); }; }
     else if(f.kind === "choice" && f.choices){ w.innerHTML = `<label class="l">${esc(f.label)}</label><select class="sel"></select>`; inp = w.querySelector("select"); inp.innerHTML = f.choices.map(c => `<option>${esc(c)}</option>`).join(""); if(cur != null) inp.value = String(cur); inp.onchange = () => { vals[f.i] = inp.value; saveVals(); }; }
     else { w.innerHTML = `<label class="l">${esc(f.label)}${f.min != null ? ` <span class="hint">(${f.min}–${f.max})</span>` : ""}</label><input type="${f.kind === "number" ? "number" : "text"}">`; inp = w.querySelector("input"); if(f.min != null){ inp.min = f.min; inp.max = f.max; } if(f.kind === "number") inp.step = f.int ? 1 : "any"; inp.value = cur ?? ""; inp.oninput = () => { vals[f.i] = inp.value === "" ? null : (f.kind === "number" ? +inp.value : inp.value); saveVals(); }; }
-    box.appendChild(w);
+    const nl = niceLabel(f);
+    const lab = w.querySelector("label.l") || w.querySelector("label");
+    if(nl && lab){
+      if(f.kind === "bool") lab.lastChild.textContent = " " + nl.l; else lab.firstChild.textContent = nl.l;
+      lab.insertAdjacentHTML("afterend", `<div class="hint" style="margin:2px 0 4px">${esc(nl.h)}</div>`);
+    }
+    (isMain(f) ? main : box).appendChild(w);
   }
+}
+// Bekannte Space-Einstellungen verständlich beschriften
+function niceLabel(f){
+  const n = (f.name + " " + f.label).toLowerCase();
+  if(/canvas|resolution|size|aspect|preset/.test(n)) return { l: "Auflösung & Format", h: "„fast“ = schneller und günstiger zum Ausprobieren, „full“/„max“ = volle Qualität." };
+  if(/steps/.test(n)) return { l: "Schritte", h: "Mehr Schritte = bessere Qualität, aber langsamer. Turbo-Modelle brauchen nur wenige (4–8)." };
+  if(/guidance|cfg/.test(n)) return { l: "Prompt-Treue (CFG)", h: "Höher = hält sich genauer an den Prompt, zu hoch wirkt unnatürlich." };
+  if(/upsample|enhance|expand|rewrite|refine/.test(n) && f.kind === "bool") return { l: "Prompt automatisch ausschmücken", h: "Der Space erweitert deinen Prompt selbst um Details (kann vom Wunsch abweichen)." };
+  if(/lora/.test(n)) return { l: "Stil / Beschleuniger (LoRA)", h: "Zusatzmodul für Stil oder Tempo. Leer = Standard des Space." };
+  if(/fps/.test(n)) return { l: "Bilder pro Sekunde", h: "Mehr = flüssiger, aber mehr Rechenarbeit." };
+  if(/frames/.test(n)) return { l: "Anzahl Einzelbilder", h: "Mehr Bilder = längeres Video, dauert länger." };
+  if(/\bwidth\b|width/.test(n)) return { l: "Breite", h: "In Pixeln." };
+  if(/height/.test(n)) return { l: "Höhe", h: "In Pixeln." };
+  return null;
 }
 // Gemietete GPU: erst warten, bis der Space fertig gebaut und gestartet ist (beim ersten Mal oft 5–20 Min.).
 function notifyReady(s){
@@ -1650,6 +1673,7 @@ async function cloudPoll(){
     txt = `${st.progress.desc ? st.progress.desc + ": " : "Schritt "}${st.progress.index} von ${st.progress.length}`;
   } else if(st.progress && st.progress.progress != null){ pct = st.progress.progress * 100; }
   else if(st.code === "RETRY") txt = "Anbieter kennt nicht alle Einstellungen – versuche es mit Standardwerten …";
+  else if(st.code === "BUSY_RETRY") txt = `Eine geteilte HuggingFace-GPU ist gerade ausgelastet – neuer Versuch ${st.attempt} von 3 in ${st.wait} Sek. …`;
   else if(st.code === "RETRY_CHOICE") txt = "Der Space erwartet bei einer Einstellung feste Werte – nehme den ersten passenden und versuche es nochmal …";
   else if(run.sel.mode === "provider") txt = "Der Anbieter erstellt dein Ergebnis …";
   if(pct == null && run.est) pct = Math.min(95, el / run.est * 100);

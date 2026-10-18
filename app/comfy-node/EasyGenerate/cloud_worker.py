@@ -277,7 +277,8 @@ def op_space(job):
         args.append(v)
     learned = {}
     res = None
-    for attempt in range(4):
+    busy_tries = 0
+    for attempt in range(8):
         emit(type="status", stage="submit")
         j = c.submit(*args, api_name=job["api"])
         watch_job(j)
@@ -285,8 +286,16 @@ def op_space(job):
             res = j.result()
             break
         except Exception as e:
+            busy = re.search(r"at capacity|gpu limit|could not allocate|too many|concurrent|try again|retry", str(e), re.I) and \
+                not re.search(r"exceeded your (free )?gpu quota|quota exceeded", str(e), re.I)
+            if busy and busy_tries < 3:            # geteilte GPU kurz ausgelastet -> automatisch nochmal
+                busy_tries += 1
+                wait = 20 * busy_tries
+                emit(type="status", stage="run", code="BUSY_RETRY", attempt=busy_tries, wait=wait)
+                time.sleep(wait)
+                continue
             fix = choice_fix(str(e), ep["fields"], args)
-            if not fix or attempt == 3:
+            if not fix or attempt == 7:
                 raise
             i, choices, pick = fix                 # Space kennt nur bestimmte Werte -> merken und gueltigen nehmen
             learned[str(i)] = choices

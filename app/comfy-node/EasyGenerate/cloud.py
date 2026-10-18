@@ -487,6 +487,102 @@ def parse_space(s):
     return None
 
 
+# ---- Auswahlwerte aus dem Programmcode des Space lesen (z. B. alle Aufloesungen fuer „Canvas“).
+# Der Code wird nur gelesen (ast.parse), niemals ausgefuehrt.
+import ast as _ast
+
+
+def _str_list(v, names):
+    if isinstance(v, (_ast.List, _ast.Tuple, _ast.Set)):
+        vals = [e.value for e in v.elts if isinstance(e, _ast.Constant) and isinstance(e.value, str)]
+        return vals if len(vals) >= 2 and len(vals) == len(v.elts) else None
+    if isinstance(v, _ast.Dict):
+        vals = [k.value for k in v.keys if isinstance(k, _ast.Constant) and isinstance(k.value, str)]
+        return vals if len(vals) >= 2 and len(vals) == len(v.keys) else None
+    if isinstance(v, _ast.Name):
+        return names.get(v.id)
+    if isinstance(v, _ast.Call):            # list(X), list(X.keys()), sorted(X)
+        if v.args:
+            return _str_list(v.args[0], names)
+        if isinstance(v.func, _ast.Attribute) and v.func.attr == "keys":
+            return _str_list(v.func.value, names)
+    if isinstance(v, _ast.Attribute) and v.attr == "keys":
+        return _str_list(v.value, names)
+    return None
+
+
+def _scan_source(src):
+    tree = _ast.parse(src)
+    names, widgets = {}, []
+    for _ in range(2):   # zweimal, damit Verweise auf spaeter definierte Listen aufgeloest werden
+        for node in _ast.walk(tree):
+            if isinstance(node, (_ast.Assign, _ast.AnnAssign)):
+                targets = node.targets if isinstance(node, _ast.Assign) else [node.target]
+                vals = _str_list(node.value, names) if node.value is not None else None
+                if vals:
+                    for t in targets:
+                        if isinstance(t, _ast.Name):
+                            names[t.id] = vals
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Call):
+            kw = {k.arg: k.value for k in node.keywords if k.arg}
+            if "choices" in kw:
+                ch = _str_list(kw["choices"], names)
+                lab = kw.get("label")
+                if ch:
+                    widgets.append((lab.value if isinstance(lab, _ast.Constant) and isinstance(lab.value, str) else "", ch))
+    return names, widgets
+
+
+async def _choices_from_source(sid, endpoints):
+    want = [(ep, f) for ep in endpoints for f in ep["fields"] if f["kind"] == "text" and f.get("role") not in ("prompt", "negative") and not f.get("choices")]
+    if not want:
+        return
+    key = "src:" + sid
+    if key in CACHE and time.time() - CACHE[key][0] < 3600:
+        names, widgets = CACHE[key][1]
+    else:
+        tree = await hf("GET", f"/api/spaces/{sid}/tree/main")
+        files = [t["path"] for t in (tree if isinstance(tree, list) else []) if t.get("type") == "file"
+                 and t["path"].endswith(".py") and (t.get("size") or 0) < 400000]
+        files.sort(key=lambda p: (0 if p in ("app.py", "main.py") else 1, p.count("/"), p))
+        names, widgets = {}, []
+        for path in files[:8]:
+            res = await hf("GET", f"/spaces/{sid}/raw/main/{quote(path)}", timeout=30)
+            src = res.get("_text") if isinstance(res, dict) else None
+            if not src:
+                continue
+            try:
+                n, w = await asyncio.to_thread(_scan_source, src)
+                names.update(n)
+                widgets += w
+            except SyntaxError:
+                pass
+        CACHE[key] = (time.time(), (names, widgets))
+    for ep, f in want:
+        nm = re.sub(r"[^a-z0-9]", "", (f.get("name") or "").lower())
+        lab = (f.get("label") or "").lower()
+        dflt = f.get("default")
+        best = None
+        for wl, ch in widgets:                                # 1. gleich beschriftete Auswahl im Code
+            if lab and wl and wl.lower().strip() == lab.strip():
+                best = ch
+        if not best and nm and len(nm) >= 3:                  # 2. Liste, deren Name den Feldnamen enthaelt (CANVAS_PRESETS ...)
+            cands = [ch for k, ch in names.items() if nm in re.sub(r"[^a-z0-9]", "", k.lower())]
+            if dflt:
+                cands = [c for c in cands if dflt in c] or cands
+            if cands:
+                best = max(cands, key=len)
+        if not best and isinstance(dflt, str) and dflt:       # 3. Liste, die den Standardwert enthaelt
+            cands = [ch for ch in names.values() if dflt in ch] + [ch for _, ch in widgets if dflt in ch]
+            if cands:
+                best = max(cands, key=len)
+        if best and len(best) <= 60:
+            f["kind"], f["choices"] = "choice", best
+            if not f.get("default") or f["default"] not in best:
+                f["default"] = best[0]
+
+
 @routes.post("/easy/cloud/space_info")
 async def cloud_space_info(request):
     data = await request.json()
@@ -514,6 +610,11 @@ async def cloud_space_info(request):
     r = await run_worker({"op": "info", "space": sid, "token": space_token()}, timeout=180)
     if r.get("type") != "result":
         return web.json_response({"error": r.get("error"), "meta": meta}, status=502)
+    if not sid.startswith("http"):
+        try:
+            await _choices_from_source(sid, r["endpoints"])
+        except Exception as e:
+            print("[Easy Generate] Space-Quelltext nicht auswertbar:", e)
     learned = cstate().get("choices", {})
     for ep in r["endpoints"]:
         for i, ch in (learned.get(sid + ep["api"]) or {}).items():
