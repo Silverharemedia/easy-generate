@@ -1226,6 +1226,7 @@ async function renderRent(){
       <label class="l">Space (Programm), das auf der GPU laufen soll</label>
       <input type="text" id="rSpace" list="rSpaceList" placeholder="z. B. Lightricks/LTX-2-3" value="${esc(cloud.rentSpace)}">
       <datalist id="rSpaceList">${["Lightricks/LTX-2-3", "Lightricks/ltx-video-distilled", "zerogpu-aoti/wan2-2-fp8da-aoti-faster", "multimodalart/wan2-1-fast", "MiniMaxAI/MiniMax-H3-Turbo-Lora", "Qwen/Qwen-Image-2.1", "black-forest-labs/flux-3-image-klein", "Tongyi-MAI/Z-Image-Turbo"].map(x => `<option value="${x}">`).join("")}</datalist>
+      <div id="rDeps"></div>
       <label class="l">Grafikkarte</label>
       <select class="sel" id="rHw"></select>
       <label class="l">Schaltet sich automatisch aus nach</label>
@@ -1249,11 +1250,22 @@ async function renderRent(){
     $("#rCost").innerHTML = h ? `<div>Kosten: <b>${usd(h.per_hour)}/Std.</b></div>${av ? (av.v > 0.01 ? `<div>Dein Guthaben reicht für ≈ <b>${(av.v / h.per_hour).toFixed(1).replace(".", ",")} Std.</b></div>` : `<div class="msg warn" style="margin:6px 0">Kein Guthaben vorhanden – zum Mieten zuerst bei HuggingFace Guthaben aufladen.</div>`) : ""}<div>Der erste Start dauert einige Minuten (Space wird gebaut, Modell geladen) – auch diese Zeit kostet.</div>` : "";
   };
   hwSel.onchange = cost; cost();
+  let depT = null;
+  const checkDeps = () => { clearTimeout(depT); depT = setTimeout(async () => {
+    const id = $("#rSpace").value.trim().replace(/^https?:\/\/huggingface\.co\/spaces\//, "").replace(/\/$/, "");
+    if(!/^[\w.\-]+\/[\w.\-]+$/.test(id)){ $("#rDeps").innerHTML = ""; return; }
+    $("#rDeps").innerHTML = `<span class="hint">Prüfe den Space …</span>`;
+    const deps = await spaceDeps(id);
+    if($("#rSpace") && $("#rSpace").value.trim().endsWith(id.split("/")[1])) $("#rDeps").innerHTML = depWarning(deps, false);
+  }, 500); };
+  $("#rSpace").oninput = checkDeps; $("#rSpace").onchange = checkDeps; checkDeps();
   $("#rGo").onclick = async () => {
     const sp = $("#rSpace").value.trim().replace(/^https?:\/\/huggingface\.co\/spaces\//, "").replace(/\/$/, "");
     if(!/^[\w.\-]+\/[\w.\-]+$/.test(sp)){ $("#rMsg").innerHTML = `<div class="msg err">Bitte einen Space angeben, z. B. Lightricks/LTX-2-3.</div>`; return; }
     if(!a.token_set){ $("#rMsg").innerHTML = `<div class="msg err">${esc(cloudErr("AUTH"))}</div>`; return; }
     const h = hws.find(x => x.name === hwSel.value);
+    const dps = (await spaceDeps(sp)).filter(d => d.zero);
+    if(dps.length && !confirm(T("Achtung: Dieser Space nutzt einen fremden Gratis-Dienst. Auch gemietet kann es dort Warteschlangen geben.") + "\n\n" + dps.map(d => d.id).join(", ") + "\n\n" + T("Trotzdem mieten?"))) return;
     if(!confirm(T(`„${sp}“ auf ${h ? h.pretty : hwSel.value} mieten?`) + "\n\n" + T(`Kosten: ${h ? usd(h.per_hour) : "?"} pro Stunde, solange der Space läuft. Ohne Nutzung schaltet er sich automatisch aus.`))) return;
     $("#rGo").disabled = true; $("#rMsg").innerHTML = `<span class="hint">Richte ein …</span>`;
     const r = await api("/easy/cloud/rent", { space: sp, hardware: hwSel.value, sleep: +$("#rSleep").value, pause_when_ready: $("#rPwr").checked });
@@ -1318,6 +1330,18 @@ async function drawRented(){
   if(state.tab === "cloud" && cloud.tab === "rent") rentTimer = setTimeout(drawRented, 15000);
 }
 
+// Prüft, ob ein Space einen fremden (Gratis-)Space aufruft – dann hilft Mieten nur teilweise.
+const depCache = {};
+async function spaceDeps(id){
+  if(!id || /^https?:/.test(id)) return [];
+  if(!depCache[id]) depCache[id] = api("/easy/cloud/space_deps?space=" + encodeURIComponent(id)).then(j => j.deps || []).catch(() => []);
+  return depCache[id];
+}
+function depWarning(deps, rented){
+  const z = deps.filter(d => d.zero);
+  if(!z.length) return "";
+  return `<div class="msg warn" style="margin:8px 0">⚠ <b>Dieser Space nutzt einen fremden Gratis-Dienst:</b> ${z.map(d => `<code>${esc(d.id)}</code>`).join(", ")}\n<span>${rented ? "Auch auf deiner gemieteten GPU läuft dieser Teil über das geteilte Gratis-Kontingent – es kann Warteschlangen und Abbrüche geben." : "Wenn du ihn mietest, läuft dieser Teil trotzdem über das geteilte Gratis-Kontingent – es kann Warteschlangen geben."}</span>\n<span>Zuverlässiger: dasselbe Modell über „💳 Pro Video bezahlen“, oder einen Space mieten, der alles selbst rechnet (z. B. LTX oder Wan).</span></div>`;
+}
 function pickHardware(cur){
   return new Promise(resolve => {
     const m = $("#modal"), c = $("#modalCard");
@@ -1362,7 +1386,11 @@ async function renderCloudStudio(){
     : s.rented ? `<span class="bdg rent">🖥️ Gemietet${s.per_hour != null ? " · " + usd(s.per_hour) + "/Std." : ""}</span>` : `<span class="bdg free">🆓 Gratis · ZeroGPU-Kontingent</span>`;
   $("#cInfo").innerHTML = `${badge} ${extLink(s.mode === "provider" ? "https://huggingface.co/" + s.id : /^https?:/.test(s.id) ? s.id : "https://huggingface.co/spaces/" + s.id, "Seite ↗")}`;
   if(s.mode === "provider") renderProviderForm(s);
-  else await renderSpaceForm(s);
+  else {
+    const depId = s.rented ? ((cloud.rented || []).find(x => x.id === s.id) || {}).from || s.id : s.id;
+    spaceDeps(depId).then(d => { if(curCloud() === s){ const w = depWarning(d, !!s.rented); if(w && !$("#cInfo").querySelector(".msg")) $("#cInfo").insertAdjacentHTML("beforeend", w); } });
+    await renderSpaceForm(s);
+  }
   renderCloudEta();
   updateGo();
 }

@@ -534,31 +534,92 @@ def _scan_source(src):
     return names, widgets
 
 
+async def _space_sources(sid):
+    """Python-Dateien eines Space (nur lesen). Zwischengespeichert fuer 1 Stunde."""
+    key = "srcfiles:" + sid
+    if key in CACHE and time.time() - CACHE[key][0] < 3600:
+        return CACHE[key][1]
+    tree = await hf("GET", f"/api/spaces/{sid}/tree/main")
+    files = [t["path"] for t in (tree if isinstance(tree, list) else []) if t.get("type") == "file"
+             and t["path"].endswith(".py") and (t.get("size") or 0) < 400000]
+    files.sort(key=lambda p: (0 if p in ("app.py", "main.py") else 1, p.count("/"), p))
+    out = []
+    for path in files[:8]:
+        try:
+            res = await hf("GET", f"/spaces/{sid}/raw/main/{quote(path)}", timeout=30)
+        except Exception:
+            continue
+        src = res.get("_text") if isinstance(res, dict) else None
+        if src:
+            out.append((path, src))
+    CACHE[key] = (time.time(), out)
+    return out
+
+
+SPACE_ID_RX = re.compile(r"""["']([A-Za-z0-9][\w.\-]{1,95}/[A-Za-z0-9][\w.\-]{1,95})["']""")
+
+
+def _dep_candidates(src):
+    """Space-IDs, die der Code per gradio_client / Client(...) aufruft."""
+    if "gradio_client" not in src and "Client(" not in src:
+        return set()
+    cands = set()
+    for m in re.finditer(r"Client\(\s*([^,)\n]+)", src):
+        arg = m.group(1).strip()
+        mm = SPACE_ID_RX.fullmatch(arg)
+        if mm:
+            cands.add(mm.group(1))
+        elif re.fullmatch(r"[A-Za-z_]\w*", arg):      # Variable -> deren Wert suchen
+            for d in re.finditer(r"\b%s\s*=\s*(.+)" % re.escape(arg), src):
+                for x in SPACE_ID_RX.findall(d.group(1)):
+                    cands.add(x)
+    return {c for c in cands if not c.lower().endswith((".py", ".json", ".safetensors"))}
+
+
+async def _space_deps(sid):
+    key = "deps:" + sid
+    if key in CACHE and time.time() - CACHE[key][0] < 3600:
+        return CACHE[key][1]
+    cands = set()
+    for path, src in await _space_sources(sid):
+        cands |= _dep_candidates(src)
+    deps = []
+    for c in sorted(cands):
+        if c == sid:
+            continue
+        try:
+            sp = await hf("GET", f"/api/spaces/{c}?expand[]=runtime", auth=False)
+            hw = ((sp.get("runtime") or {}).get("hardware") or {}).get("current")
+            deps.append({"id": c, "zero": hw == "zero-a10g", "hardware": hw})
+        except Exception:
+            pass
+    CACHE[key] = (time.time(), deps)
+    return deps
+
+
+@routes.get("/easy/cloud/space_deps")
+async def cloud_space_deps(request):
+    sid = parse_space(request.query.get("space", ""))
+    if not sid or sid.startswith("http"):
+        return web.json_response({"deps": []})
+    try:
+        return web.json_response({"deps": await _space_deps(sid)})
+    except Exception as e:
+        return web.json_response({"deps": [], "error": str(e)})
+
+
 async def _choices_from_source(sid, endpoints):
     want = [(ep, f) for ep in endpoints for f in ep["fields"] if f["kind"] == "text" and f.get("role") not in ("prompt", "negative") and not f.get("choices")]
     if not want:
         return
-    key = "src:" + sid
-    if key in CACHE and time.time() - CACHE[key][0] < 3600:
-        names, widgets = CACHE[key][1]
-    else:
-        tree = await hf("GET", f"/api/spaces/{sid}/tree/main")
-        files = [t["path"] for t in (tree if isinstance(tree, list) else []) if t.get("type") == "file"
-                 and t["path"].endswith(".py") and (t.get("size") or 0) < 400000]
-        files.sort(key=lambda p: (0 if p in ("app.py", "main.py") else 1, p.count("/"), p))
-        names, widgets = {}, []
-        for path in files[:8]:
-            res = await hf("GET", f"/spaces/{sid}/raw/main/{quote(path)}", timeout=30)
-            src = res.get("_text") if isinstance(res, dict) else None
-            if not src:
-                continue
-            try:
-                n, w = await asyncio.to_thread(_scan_source, src)
-                names.update(n)
-                widgets += w
-            except SyntaxError:
-                pass
-        CACHE[key] = (time.time(), (names, widgets))
+    names, widgets = {}, []
+    for path, src in await _space_sources(sid):
+        try:
+            n, w = await asyncio.to_thread(_scan_source, src)
+            names.update(n)
+            widgets += w
+        except SyntaxError:
+            pass
     for ep, f in want:
         nm = re.sub(r"[^a-z0-9]", "", (f.get("name") or "").lower())
         lab = (f.get("label") or "").lower()
