@@ -551,7 +551,7 @@ function showTab(t){
   $("#settings").classList.toggle("hidden", t !== "set");
   $("#cloud").classList.toggle("hidden", t !== "cloud");
   if(t === "video" || t === "image"){ state.kind = t; renderStudio(); }
-  if(t === "cloud") renderCloud();
+  if(t === "cloud") renderCloud(true);
   if(t === "gal") loadGallery();
   if(t === "models") loadCatalog();
   if(t === "set") renderSettings();
@@ -952,6 +952,7 @@ function cloudErr(e){
   }
   if(M[code]) return M[code] + (det ? "\n\n" + det.slice(0, 400) : "");
   if(/timed out|timeout|Zeitueberschreitung|ConnectTimeout|ReadTimeout/i.test(s)) return "Der Space antwortet noch nicht – vermutlich startet er gerade noch. In ein, zwei Minuten „Erneut versuchen“.";
+  if(/timed out|timeout|Zeitueberschreitung|ConnectTimeout|ReadTimeout/i.test(s)) return "Der Space antwortet noch nicht – vermutlich startet er gerade noch. In ein, zwei Minuten „Erneut versuchen“.";
   return s.slice(0, 600);
 }
 function extLink(url, text, cls){ return `<a class="${cls || ""}" href="${esc(url)}" target="_blank" rel="noopener">${text}</a>`; }
@@ -1092,17 +1093,30 @@ async function checkSetup(){
 }
 
 /* ---------- Cloud-Seite ---------- */
-async function renderCloud(){
+async function renderCloud(fresh){
   chips($("#clTabs"), [["free", { n: "🆓 Gratis", sub: "ZeroGPU-Spaces" }], ["pay", { n: "💳 Pro Video bezahlen", sub: "über dein HF-Guthaben" }], ["rent", { n: "🖥️ GPU mieten", sub: "pro Stunde, eigener Space" }]], cloud.tab,
     t => { cloud.tab = t; store.set("clTab", t); renderCloud(); });
   checkSetup();
-  if(!cloud.acct) { renderAccount(); await loadAccount(); }
+  if(!cloud.acct || fresh){ if(!cloud.acct) renderAccount(); await loadAccount(true); if(state.tab !== "cloud") return; }
   if(!cloud.hw) api("/easy/cloud/hardware").then(j => { cloud.hw = j.items || []; if(state.tab === "cloud"){ renderReach(); if(cloud.tab === "rent") renderRent(); } });
   renderAccount(); renderReach();
   if(cloud.tab === "free") renderFree();
   else if(cloud.tab === "pay") renderPay();
   else renderRent();
 }
+// Konto & Guthaben alle 60 Sekunden auffrischen, solange die Cloud-Seite offen ist
+async function refreshAccountBox(){
+  if(state.tab !== "cloud" || document.hidden) return;
+  const box = $("#clAcct");
+  if(box.contains(document.activeElement) || [...box.querySelectorAll("input")].some(i => i.value)) return;   // nicht beim Tippen stören
+  await loadAccount(true);
+  if(state.tab !== "cloud") return;
+  const open = [...box.querySelectorAll("details")].map(d => d.open);
+  renderAccount(); renderReach();
+  box.querySelectorAll("details").forEach((d, i) => { if(open[i]) d.open = true; });
+  if(cloud.tab === "rent" && $("#rHw")) $("#rHw").dispatchEvent(new Event("change"));
+}
+setInterval(refreshAccountBox, 60000);
 function useCloud(kind, sel){
   sel = Object.assign({ kind }, sel);
   state.compute[kind] = "cloud"; store.set("compute", state.compute);
