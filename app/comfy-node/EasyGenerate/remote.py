@@ -23,6 +23,9 @@ from .cloud import (HF, CACHE, HFError, _rented_entry, _resume_watches, cstate, 
                     save_cstate, space_token, token)
 
 SPACE_NAME = "eg-comfyui"
+# Nur erhoehen, wenn sich etwas aendert, das auf der Cloud-GPU selbst laufen muss
+# (dann wird dort ein Update angeboten). 2 = Fortschritt per /easy/progress.
+REMOTE_API = 2
 
 DOCKERFILE = """FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg libgl1 libglib2.0-0 \\
@@ -134,7 +137,7 @@ async def comfy_create(request):
         st = cstate()
         st["rented"] = [x for x in st.get("rented", []) if x["id"] != sid]
         st["rented"].append({"id": sid, "from": "ComfyUI (Easy Generate)", "kind": "comfy", "hardware": hw, "sleep": sleep,
-                             "created": time.time(), "version": VERSION, "pause_when_ready": bool(data.get("pause_when_ready"))})
+                             "created": time.time(), "version": VERSION, "api": REMOTE_API, "pause_when_ready": bool(data.get("pause_when_ready"))})
         save_cstate(st)
         if data.get("pause_when_ready"):
             ensure_watch(sid)
@@ -163,6 +166,7 @@ async def comfy_update(request):
         e = _rented_entry(st, x["id"])
         if e:
             e["version"] = VERSION
+            e["api"] = REMOTE_API
             save_cstate(st)
         return web.json_response({"ok": True})
     except HFError as e:
@@ -175,7 +179,7 @@ async def comfy_info(request):
     if not x:
         return web.json_response({"exists": False, "space_token": bool(space_token()), "version": VERSION})
     out = {"exists": True, "id": x["id"], "hardware": x.get("hardware"), "remote_version": x.get("version"),
-           "version": VERSION, "space_token": bool(space_token())}
+           "version": VERSION, "space_token": bool(space_token()), "needs_update": int(x.get("api") or 1) < REMOTE_API}
     try:
         rt = await hf("GET", f"/api/spaces/{x['id']}/runtime")
         out["stage"] = rt.get("stage")

@@ -1006,10 +1006,24 @@ function renderGpuBar(){
   const hw = ((cloud.hw || []).find(h => h.name === (i.current || i.hardware)) || {});
   const ST = { RUNNING: "läuft", PAUSED: "aus – startet automatisch beim Erstellen", SLEEPING: "aus – startet automatisch beim Erstellen", STOPPED: "aus – startet automatisch beim Erstellen", BUILDING: "wird eingerichtet", APP_STARTING: "startet", RUNNING_APP_STARTING: "startet", RUNNING_BUILDING: "wird aktualisiert" };
   el.innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px"><span class="bdg rent">🚀 Cloud-GPU${hw.pretty ? " · " + esc(hw.pretty) : ""}${hw.per_hour ? " · " + usd(hw.per_hour) + "/Std." : ""}</span><span class="hint">${esc(ST[i.stage] || i.stage || "")}</span>
-    ${i.remote_version && i.remote_version !== i.version ? `<button class="btn" type="button" id="gpuUpd" style="font-size:12px;padding:4px 10px">⬆ Cloud-GPU auf ${esc(i.version)} aktualisieren</button>` : ""}
+    ${i.needs_update ? `<button class="btn" type="button" id="gpuUpd" style="font-size:12px;padding:4px 10px">⬆ Cloud-GPU auf ${esc(i.version)} aktualisieren</button>` : ""}
+    ${i.stage === "RUNNING" || /STARTING|BUILDING/.test(i.stage || "") ? `<button class="btn" type="button" id="gpuPause" style="font-size:12px;padding:4px 10px">⏸ Pausieren</button>` : ["PAUSED", "SLEEPING", "STOPPED"].includes(i.stage) ? `<button class="btn" type="button" id="gpuStart" style="font-size:12px;padding:4px 10px">▶ Starten</button>` : ""}
     <button class="btn" type="button" id="gpuRef" style="font-size:12px;padding:4px 10px" title="Aktualisieren">↻</button></div>`;
+  if($("#gpuPause")) $("#gpuPause").onclick = () => rentedAction(i.id, "pause");
+  if($("#gpuStart")) $("#gpuStart").onclick = () => rentedAction(i.id, "start");
   $("#gpuRef").onclick = async () => { gpu.info = null; renderGpuBar(); };
   if($("#gpuUpd")) $("#gpuUpd").onclick = async () => { $("#gpuUpd").disabled = true; const r = await api("/easy/cloud/comfy/update", {}); if(r.error) toast("❌ " + esc(r.error), "err"); else toast("✅ " + esc(T("Wird aktualisiert – die Cloud-GPU richtet sich in einigen Minuten neu ein.")), "ok"); gpu.info = null; renderGpuBar(); };
+}
+// Pausieren / Starten direkt aus dem Studio
+async function rentedAction(id, act){
+  if(act === "pause" && (state.run || cloud.run) && !confirm(T("Gerade wird etwas erstellt. Trotzdem pausieren? Der Auftrag geht dabei verloren."))) return;
+  const r = await api("/easy/cloud/rented/" + act, { space: id });
+  if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
+  toast(act === "pause" ? "⏸ " + esc(T("Pausiert – kostet jetzt nichts mehr.")) : "▶ " + esc(T("Die GPU startet – das dauert ein paar Minuten. Im Studio siehst du den Fortschritt.")), "ok", 5000);
+  if(act === "pause" && state.run && state.run.B) fail("Abgebrochen.");
+  gpu.info = null; delete cloud.info[id];
+  setTimeout(() => { gpu.info = null; renderStudio(); }, 3000);
+  renderStudio();
 }
 // Einrichtung der Cloud-GPU (einmalig)
 async function gpuSetupCard(){
@@ -1553,8 +1567,9 @@ async function renderCloudStudio(){
     updateGo(); return;
   }
   const badge = s.mode === "provider" ? `<span class="bdg pay">💳 ca. ${usd(unitPrice({ price: s.price || { unit: "s", usd: 0.08 }, learned: (cloud.acct && cloud.acct.costs || {})[s.id] }, s.task).usd)} ${TASKK[s.task] === "video" ? "pro 5-s-Video" : "pro Bild"}</span>`
-    : s.rented ? `<span class="bdg rent">🖥️ Gemietet${s.per_hour != null ? " · " + usd(s.per_hour) + "/Std." : ""}</span>` : `<span class="bdg free">🆓 Gratis · ZeroGPU-Kontingent</span>`;
+    : s.rented ? `<span class="bdg rent">🖥️ Gemietet${s.per_hour != null ? " · " + usd(s.per_hour) + "/Std." : ""}</span> <button class="btn" type="button" id="cPauseR" style="font-size:12px;padding:3px 10px">⏸ Pausieren</button>` : `<span class="bdg free">🆓 Gratis · ZeroGPU-Kontingent</span>`;
   $("#cInfo").innerHTML = `${badge} ${extLink(s.mode === "provider" ? "https://huggingface.co/" + s.id : /^https?:/.test(s.id) ? s.id : "https://huggingface.co/spaces/" + s.id, "Seite ↗")}`;
+  if($("#cPauseR")) $("#cPauseR").onclick = () => rentedAction(s.id, "pause");
   if(s.mode === "provider") renderProviderForm(s);
   else {
     const depId = s.rented ? ((cloud.rented || []).find(x => x.id === s.id) || {}).from || s.id : s.id;
