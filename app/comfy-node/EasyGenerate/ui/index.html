@@ -1,0 +1,1051 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Easy Generate</title>
+<style>
+:root{
+  --bg:#0e1014; --side:#12151b; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+  --text:#e8eaf0; --muted:#9aa1b2; --accent:#ff6a3d; --accent2:#ff8a5c;
+  --ok:#3ecf8e; --err:#ff5c6c; --warn:#f5b84a; --r:14px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,input,textarea,select{font:inherit;color:inherit}
+a{color:var(--accent2)}
+.app{display:flex;height:100vh}
+aside{width:220px;flex:none;background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:18px 12px}
+.logo{font-weight:800;font-size:19px;letter-spacing:-.3px;padding:0 10px 18px;display:flex;align-items:center;gap:10px}
+.logo i{width:30px;height:30px;border-radius:9px;background:var(--accent);display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-size:14px}
+.logo span{color:var(--accent)}
+.nav button{display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;padding:11px 12px;border-radius:10px;cursor:pointer;color:var(--muted);text-align:left;font-size:15px}
+.nav button:hover{background:var(--panel)}
+.nav button.act{background:var(--panel2);color:var(--text);font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
+.nav .ico{width:22px;text-align:center}
+.nav .badge{margin-left:auto;background:var(--accent);color:#fff;border-radius:99px;font-size:11px;padding:1px 7px}
+.sidefoot{margin-top:auto;padding:10px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:6px}
+.status{display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--err);flex:none}
+.dot.on{background:var(--ok)}
+.upd{background:#2a1b16;border:1px solid var(--accent);color:var(--accent2);border-radius:9px;padding:7px 9px;cursor:pointer;font-size:12px;text-align:left}
+main{flex:1;overflow:auto}
+.wrap{max-width:1240px;margin:0 auto;padding:22px}
+h1{font-size:22px;margin:0 0 4px} .sub{color:var(--muted);margin:0 0 18px;font-size:14px}
+.grid{display:grid;grid-template-columns:minmax(0,440px) minmax(0,1fr);gap:16px}
+@media (max-width:1000px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.card h3{margin:0 0 10px;font-size:15px}
+label.l{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
+textarea{width:100%;min-height:110px;resize:vertical;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none}
+textarea:focus,input:focus,select:focus{border-color:var(--accent);outline:none}
+input[type=number],input[type=text],input[type=password],select.sel{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{background:var(--panel2);border:1px solid var(--line);padding:7px 12px;border-radius:9px;cursor:pointer;font-size:14px}
+.chip.act{border-color:var(--accent);color:var(--accent2);background:#2a1b16}
+.chip small{display:block;color:var(--muted);font-size:11px}
+.row{display:flex;align-items:center;gap:10px}
+input[type=range]{flex:1;accent-color:var(--accent)}
+.big{width:100%;margin-top:16px;padding:14px;border:0;border-radius:12px;background:var(--accent);color:#fff;font-weight:700;font-size:16px;cursor:pointer}
+.big:hover{background:var(--accent2)} .big:disabled{opacity:.5;cursor:not-allowed}
+.btn{background:var(--panel2);border:1px solid var(--line);padding:8px 14px;border-radius:9px;cursor:pointer;text-decoration:none;color:var(--text);display:inline-block;font-size:14px}
+.btn:hover{border-color:var(--muted)} .btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.pri{border-color:var(--accent);color:var(--accent2)} .btn.danger{color:var(--err)}
+.hint{color:var(--muted);font-size:13px}
+details{margin-top:14px} summary{cursor:pointer;color:var(--muted);font-size:13px}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:14px;text-align:center;cursor:pointer;color:var(--muted)}
+.drop.over{border-color:var(--accent)} .drop img{max-width:100%;max-height:190px;border-radius:8px;display:block;margin:0 auto 6px}
+.stage{min-height:380px;display:flex;flex-direction:column;gap:12px}
+.viewer{flex:1;display:flex;align-items:center;justify-content:center;background:#0a0c10;border-radius:12px;min-height:320px;overflow:hidden;flex-wrap:wrap;gap:6px;padding:6px}
+.viewer video,.viewer img{max-width:100%;max-height:70vh;display:block;border-radius:6px}
+.viewer.multi img{max-width:calc(50% - 6px)}
+.empty{color:var(--muted);text-align:center;padding:30px}
+.bar{height:10px;background:var(--panel2);border-radius:99px;overflow:hidden}
+.bar>div{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .3s}
+.msg{padding:10px 12px;border-radius:10px;font-size:14px;white-space:pre-wrap}
+.msg.err{background:#2c1418;color:#ffb3bb;border:1px solid #5a2029}
+.msg.ok{background:#12261d;color:#a6f0cb;border:1px solid #1f5a3e}
+.msg.warn{background:#2b2312;color:#ffe0a3;border:1px solid #5c4818}
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.gal .it{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.gal video,.gal img{width:100%;display:block;background:#000;aspect-ratio:16/10;object-fit:contain}
+.gal .meta{padding:8px 10px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:8px}
+.cat{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.mc{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.mc.inst{border-color:#1f5a3e}
+.mc .th{aspect-ratio:16/9;background:#0a0c10 center/cover no-repeat;position:relative}
+.mc .th .st{position:absolute;top:8px;left:8px;font-size:11px;padding:2px 8px;border-radius:99px;background:#000a;backdrop-filter:blur(4px)}
+.mc .bd{padding:12px;display:flex;flex-direction:column;gap:6px;flex:1}
+.mc .tt{font-weight:600;font-size:14px}
+.mc .ds{font-size:12px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.mc .tags{display:flex;gap:4px;flex-wrap:wrap}
+.mc .tags span{font-size:11px;color:var(--muted);background:var(--panel2);border-radius:6px;padding:1px 6px}
+.mc .ac{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:6px}
+.mc .mbar{height:4px;background:var(--panel2);border-radius:9px;overflow:hidden}.mc .mbar>div{height:100%;background:var(--accent);width:0}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.toolbar input[type=text]{max-width:260px}
+.ok{color:var(--ok)} .bad{color:var(--err)}
+.hidden{display:none!important}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.toolsel{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.toolsel select{max-width:420px}
+.slots{display:grid;gap:10px}
+.modal{position:fixed;inset:0;background:#0009;display:flex;align-items:center;justify-content:center;z-index:50}
+.modal .card{max-width:520px;width:calc(100% - 32px)}
+code{background:var(--panel2);padding:1px 6px;border-radius:5px}
+.log div{margin:3px 0;font-size:14px}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="logo"><i>▶</i>Easy<span>Generate</span></div>
+    <div class="nav">
+      <button data-tab="video" class="act"><span class="ico">🎬</span>Video</button>
+      <button data-tab="image"><span class="ico">🖼️</span>Bild</button>
+      <button data-tab="gal"><span class="ico">📁</span>Galerie</button>
+      <button data-tab="models"><span class="ico">📦</span>Modelle<span class="badge hidden" id="dlBadge"></span></button>
+      <button data-tab="set"><span class="ico">⚙️</span>Einstellungen</button>
+    </div>
+    <div class="sidefoot">
+      <button class="upd hidden" id="updBtn"></button>
+      <div class="status"><span class="dot" id="dot"></span><span id="statusTxt">Verbinde …</span></div>
+      <div id="verTxt"></div>
+    </div>
+  </aside>
+
+  <main>
+  <div class="wrap">
+
+  <!-- STUDIO (Video + Bild) -->
+  <section id="studio">
+    <h1 id="stTitle">Video erstellen</h1>
+    <p class="sub" id="stSub"></p>
+    <div id="noTool" class="card hidden"></div>
+    <div id="studioBody">
+      <div class="toolsel">
+        <span class="hint">Modell:</span>
+        <select class="sel" id="toolSel"></select>
+        <button class="btn" type="button" id="moreModels">+ Weitere Modelle</button>
+      </div>
+      <div id="notReady" class="msg warn hidden" style="margin-bottom:14px"></div>
+      <div class="grid">
+        <div class="card">
+          <div id="imgSlots" class="slots"></div>
+          <label class="l" for="prompt" id="promptLbl">Was soll passieren?</label>
+          <textarea id="prompt"></textarea>
+          <div class="actions" style="margin-top:8px"><button class="btn" type="button" id="aiBtn">✨ Prompt mit KI verbessern</button></div>
+          <div id="aiBox" class="card hidden" style="margin-top:10px;background:var(--panel2)">
+            <div class="hint" style="margin-bottom:6px">Vorschlag (Englisch – die Modelle verstehen Englisch am besten):</div>
+            <textarea id="aiOut" style="min-height:120px"></textarea>
+            <div class="hint" id="aiDe" style="margin:6px 0"></div>
+            <label class="l" for="aiWish" style="margin-top:8px">Noch etwas ändern? (z. B. „nachts“, „mehr Action“, „im Anime-Stil“)</label>
+            <div class="row"><input type="text" id="aiWish" placeholder="Wunsch eintippen, dann Enter"><button class="btn" type="button" id="aiRedo">Neu</button></div>
+            <div class="actions" style="margin-top:10px"><button class="btn pri" type="button" id="aiUse">Übernehmen</button><button class="btn" type="button" id="aiClose">Verwerfen</button></div>
+          </div>
+
+          <div id="fmtBox"><label class="l">Format</label><div class="chips" id="aspect"></div></div>
+          <div id="sizeBox"><label class="l">Größe</label><div class="chips" id="size"></div></div>
+          <div id="lenBox"><label class="l">Länge: <b id="secTxt">5 s</b> <span class="hint" id="frameTxt"></span></label>
+            <div class="row"><input type="range" id="sec" min="1" max="20" step="1" value="5"></div></div>
+          <div id="batchBox"><label class="l">Anzahl Bilder</label><div class="chips" id="batch"></div></div>
+
+          <details>
+            <summary>Erweitert</summary>
+            <div id="negBox"><label class="l" for="neg">Was soll NICHT vorkommen?</label>
+            <textarea id="neg" style="min-height:64px" placeholder="leer = Standard der Vorlage"></textarea></div>
+            <label class="row hidden" id="enhRow" style="gap:8px;margin-top:12px"><input type="checkbox" id="enh"> Eingebaute Prompt-Verbesserung des Modells (lokal, etwas langsamer)</label>
+            <label class="row hidden" id="turboRow" style="gap:8px;margin-top:12px"><input type="checkbox" id="turbo"> <span id="turboLbl">Schnell-Modus</span></label>
+            <label class="l">Seed (gleicher Seed + gleicher Prompt = gleiches Ergebnis)</label>
+            <div class="row"><label class="row" style="gap:6px;white-space:nowrap"><input type="checkbox" id="seedRand" checked> zufällig</label><input type="number" id="seed" min="0" placeholder="Seed" disabled></div>
+          </details>
+
+          <button class="big" id="go">Erstellen</button>
+          <p class="hint" id="goHint" style="margin:8px 0 0"></p>
+        </div>
+
+        <div class="card stage">
+          <div class="viewer" id="viewer"><div class="empty">Hier erscheint dein Ergebnis.<br><span class="hint">Tipp: Erst klein testen, dann groß erstellen.</span></div></div>
+          <div id="progBox" class="hidden">
+            <div class="row" style="justify-content:space-between;margin-bottom:6px"><span id="progTxt">Starte …</span><span class="hint" id="timeTxt">0:00</span></div>
+            <div class="bar"><div id="bar"></div></div>
+            <div class="actions" style="margin-top:10px"><button class="btn danger" id="stop">Abbrechen</button></div>
+          </div>
+          <div id="out"></div>
+          <div class="actions hidden" id="resActions"><a class="btn" id="dl" download>Herunterladen</a><button class="btn" id="again">Nochmal (neuer Seed)</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- GALERIE -->
+  <section id="gallery" class="hidden">
+    <h1>Galerie</h1><p class="sub">Deine zuletzt erstellten Videos und Bilder</p>
+    <div class="toolbar"><div class="chips" id="galFilter"></div><button class="btn" id="galReload" style="margin-left:auto">Aktualisieren</button></div>
+    <div class="gal" id="gal"></div>
+  </section>
+
+  <!-- MODELLE -->
+  <section id="models" class="hidden">
+    <h1>Modelle</h1><p class="sub">Alle Vorlagen, die ComfyUI lokal ausführen kann. Installieren lädt die nötigen Dateien automatisch in die richtigen Ordner.</p>
+    <div id="dlPanel" class="card hidden" style="margin-bottom:14px">
+      <div class="row" style="justify-content:space-between;margin-bottom:6px"><b id="dlTxt">Lade …</b><span class="hint" id="dlEta"></span></div>
+      <div class="bar"><div id="dlBar"></div></div>
+      <div class="row" style="justify-content:space-between;margin-top:8px"><span class="hint" id="dlFile"></span><button class="btn danger" type="button" id="dlStop">Anhalten</button></div>
+      <div id="dlErr"></div>
+    </div>
+    <div class="toolbar">
+      <div class="chips" id="mKind"></div>
+      <input type="text" id="mSearch" placeholder="Suchen … (z. B. LTX, Wan, Flux, Qwen)">
+      <select class="sel" id="mSort" style="width:auto"><option value="usage">Beliebteste</option><option value="date">Neueste</option><option value="size">Kleinste</option></select>
+      <label class="row hint" style="gap:6px"><input type="checkbox" id="mInst"> nur installierte</label>
+    </div>
+    <p class="hint" id="mInfo" style="margin:-4px 0 12px"></p>
+    <div class="cat" id="cat"></div>
+  </section>
+
+  <!-- EINSTELLUNGEN -->
+  <section id="settings" class="hidden">
+    <h1>Einstellungen</h1><p class="sub">&nbsp;</p>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr))">
+      <div class="card" id="appCard">
+        <h3>Programm</h3>
+        <div id="appInfo" class="hint"></div>
+        <div class="actions" style="margin-top:10px"><button class="btn pri" id="chkUpd" type="button">Nach Updates suchen</button></div>
+        <div id="updMsg" style="margin-top:8px"></div>
+      </div>
+      <div class="card" id="comfyCard">
+        <h3>ComfyUI (die KI im Hintergrund)</h3>
+        <div id="comfyInfo" class="hint"></div>
+        <div class="actions" style="margin-top:10px">
+          <button class="btn" id="cUpd" type="button">ComfyUI aktualisieren</button>
+          <button class="btn" id="cRestart" type="button">Neu starten</button>
+          <button class="btn" id="cOut" type="button">Ausgabe-Ordner öffnen</button>
+          <button class="btn" id="cModels" type="button">Modell-Ordner öffnen</button>
+          <button class="btn" id="cChange" type="button">Anderes ComfyUI wählen</button>
+        </div>
+        <div id="cMsg" style="margin-top:8px"></div>
+      </div>
+      <div class="card" id="closeCard">
+        <h3>Beim Schließen des Programms</h3>
+        <div class="chips" id="closeChips"></div>
+        <p class="hint" style="margin:8px 0 0">ComfyUI belegt im Hintergrund Grafikspeicher.</p>
+      </div>
+      <div class="card">
+        <h3>✨ KI-Prompt-Helfer</h3>
+        <div class="chips" id="provChips" style="margin-bottom:10px"></div>
+        <div id="provOllama">
+          <p class="hint" style="margin:0 0 8px">Läuft komplett auf deinem PC, kostenlos. Einmalig ein Modell laden, z. B. <code>ollama pull qwen3:8b</code> oder <code>gemma3:12b</code> (kann auch Bilder ansehen).</p>
+          <div class="row"><select class="sel" id="olModel"></select><button class="btn" type="button" id="olReload">Aktualisieren</button></div>
+          <p class="hint" id="olMsg" style="margin:6px 0 0"></p>
+        </div>
+        <div id="provClaude" class="hidden">
+          <p class="hint" style="margin:0 0 8px">Beste Qualität, sieht auch dein Startbild an. API-Key von <a href="https://platform.claude.com" target="_blank">platform.claude.com</a> (getrennt vom Claude-Abo, Abrechnung nach Verbrauch; mit Haiku 5.5 Bruchteile eines Cents pro Verbesserung).</p>
+          <label class="l">API-Key <span class="hint" id="keyHint"></span></label>
+          <input type="password" id="clKey" placeholder="sk-ant-…" autocomplete="off">
+          <label class="l">Modell</label>
+          <select class="sel" id="clModel"><option value="claude-haiku-5-5">Claude Haiku 5.5 – sehr günstig, schnell</option><option value="claude-sonnet-5-5">Claude Sonnet 5.5 – noch besser, teurer</option></select>
+        </div>
+        <div class="actions" style="margin-top:12px"><button class="btn pri" type="button" id="aiSave">Speichern</button></div>
+        <div id="aiSetMsg" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <h3>HuggingFace-Zugang (optional)</h3>
+        <p class="hint" style="margin:0 0 8px">Nur nötig, falls ein Modell beim Download „Zugang verweigert“ meldet. Token von huggingface.co → Settings → Access Tokens.</p>
+        <input type="password" id="hfTok" placeholder="hf_…" autocomplete="off">
+        <div class="actions" style="margin-top:10px"><button class="btn" type="button" id="hfSave">Speichern</button><span class="hint" id="hfHint"></span></div>
+      </div>
+      <div class="card">
+        <h3>Eigene Vorlage importieren</h3>
+        <p class="hint" style="margin:0 0 8px">Für Profis: einen in ComfyUI per <b>„Export (API)“</b> gespeicherten Ablauf als eigenes Werkzeug hinzufügen.</p>
+        <div class="row"><input type="text" id="cuName" placeholder="Name, z. B. Mein Flux-Workflow"><select class="sel" id="cuKind" style="width:auto"><option value="image">Bild</option><option value="video">Video</option></select></div>
+        <div class="actions" style="margin-top:10px"><label class="btn">Datei wählen …<input type="file" id="cuFile" accept=".json" class="hidden"></label></div>
+        <div id="cuMsg" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </section>
+
+  </div>
+  </main>
+</div>
+<div id="modal" class="modal hidden"><div class="card" id="modalCard"></div></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const host = window.easyApp || null;          // vorhanden, wenn im Easy-Generate-Programm geöffnet
+const cid = (crypto.randomUUID ? crypto.randomUUID() : "eg" + Math.random().toString(36).slice(2));
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem("eg_" + k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem("eg_" + k, JSON.stringify(v)); }catch(e){} }
+};
+const GBf = b => (b / 1073741824).toFixed(b > 10 * 1073741824 ? 0 : 1) + " GB";
+const api = async (url, body) => {
+  const r = await fetch(url, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if(!r.ok && !j.error) j.error = "Fehler " + r.status;
+  return j;
+};
+const SIZES = { fast: { n: "Schnell", f: 0.56 }, normal: { n: "Normal", f: 1 }, big: { n: "Groß", f: 1.78 } };
+const ASPECTS = { "16:9": { n: "Quer 16:9", r: 16/9 }, "9:16": { n: "Hoch 9:16", r: 9/16 }, "1:1": { n: "Quadrat", r: 1 }, "4:3": { n: "4:3", r: 4/3 }, "img": { n: "Wie Bild", r: null } };
+const KIND = { video: { title: "Video erstellen", one: "Video", icon: "🎬" }, image: { title: "Bild erstellen", one: "Bild", icon: "🖼️" } };
+
+const state = {
+  tab: "video", kind: "video",
+  installed: [], wf: {}, info: {}, cfg: {},
+  active: { video: "", image: "" },
+  aspect: store.get("aspect", { video: "16:9", image: "1:1" }),
+  size: store.get("size", "normal"), seconds: store.get("sec", 5), batch: 1,
+  images: {}, run: null, catalog: [], mKind: "video"
+};
+
+/* ================= Workflow-Analyse ================= */
+const isLink = v => Array.isArray(v) && v.length === 2 && (typeof v[0] === "string" || typeof v[0] === "number") && typeof v[1] === "number";
+const TEXT_KEYS = ["text", "prompt", "positive_prompt", "text_g", "t5xxl", "clip_l", "text_l"];
+function textKey(n){
+  if(!n || !n.inputs) return null;
+  for(const k of TEXT_KEYS) if(typeof n.inputs[k] === "string") return k;
+  if(/primitive|string/i.test(n.class_type || "") && typeof n.inputs.value === "string") return "value";
+  return null;
+}
+function traceText(wf, link, key){
+  const seen = new Set(), q = [String(link[0])];
+  while(q.length){
+    const id = q.shift();
+    if(seen.has(id)) continue; seen.add(id);
+    const n = wf[id]; if(!n) continue;
+    const tk = textKey(n); if(tk) return { id, key: tk };
+    const ins = n.inputs || {};
+    const tl = TEXT_KEYS.find(k => isLink(ins[k])) || (isLink(ins.value) && /primitive|string/i.test(n.class_type) ? "value" : null);
+    if(tl){ q.unshift(String(ins[tl][0])); continue; }
+    if(isLink(ins[key])){ q.push(String(ins[key][0])); continue; }
+    if(isLink(ins.conditioning)){ q.push(String(ins.conditioning[0])); continue; }
+    for(const v of Object.values(ins)) if(isLink(v)) q.push(String(v[0]));
+  }
+  return null;
+}
+function analyze(wf){
+  const info = { pos:null, neg:null, images:[], dims:[], lens:[], fps:null, seeds:[], base:null, baseLen:null, res:[], baseMP:null, dur:null, enh:null, batch:[] };
+  for(const [id, n] of Object.entries(wf)){
+    const ins = n.inputs || {};
+    const title = ((n._meta && n._meta.title) || "").toLowerCase();
+    if(!info.pos && isLink(ins.positive)){
+      info.pos = traceText(wf, ins.positive, "positive");
+      if(isLink(ins.negative)) info.neg = traceText(wf, ins.negative, "negative");
+    }
+    if(n.class_type === "ResolutionSelector" && typeof ins.aspect_ratio === "string" && typeof ins.megapixels === "number"){
+      info.res.push(id); if(info.baseMP == null) info.baseMP = ins.megapixels;
+    }
+    if(/^primitive(int|float)$/i.test(n.class_type) && typeof ins.value === "number"){
+      if(/duration|dauer|seconds|sekunden/.test(title) && !info.dur) info.dur = { id, v: ins.value };
+      else if(/frame ?rate|fps/.test(title)){ if(info.fps == null) info.fps = ins.value; }
+      else if(/^(length|frames?|frame count|num(ber of)? frames|video length)$/.test(title.trim())) info.lens.push({ id, k: "value", v: ins.value });
+    }
+    if(/^primitiveboolean$/i.test(n.class_type) && /(\d+ ?-?steps? ?lora|lightning|turbo|distill)/.test(title) && typeof ins.value === "boolean" && !info.turbo) info.turbo = { id, v: ins.value, title: (n._meta && n._meta.title) || "" };
+    if(/^primitiveboolean$/i.test(n.class_type) && /prompt enhance/.test(title) && typeof ins.value === "boolean") info.enh = { id, v: ins.value };
+    if(/^LoadImage(Mask)?$/.test(n.class_type) && typeof ins.image === "string") info.images.push({ id, key: "image", media: "image", title: (n._meta && n._meta.title) || "Bild" });
+    if(/^LoadAudio/i.test(n.class_type) && typeof ins.audio === "string") info.images.push({ id, key: "audio", media: "audio", title: (n._meta && n._meta.title) || "Audio" });
+    if(/LoadVideo/i.test(n.class_type)){
+      const vk = ["file", "video"].find(k => typeof ins[k] === "string");
+      if(vk) info.images.push({ id, key: vk, media: "video", title: (n._meta && n._meta.title) || "Video" });
+    }
+    if(typeof ins.width === "number" && typeof ins.height === "number") info.dims.push({ id, w: ins.width, h: ins.height, cls: n.class_type || "" });
+    if(/latent/i.test(n.class_type) && typeof ins.batch_size === "number") info.batch.push({ id, v: ins.batch_size });
+    if(!/FromBatch|Batch(Select|Slice)|Repeat|Trim|Split/i.test(n.class_type))
+      for(const k of ["length", "num_frames", "frames", "video_length", "frame_count", "frames_number"])
+        if(typeof ins[k] === "number") info.lens.push({ id, k, v: ins[k] });
+    for(const k of ["frame_rate", "fps"]) if(typeof ins[k] === "number" && info.fps == null) info.fps = ins[k];
+    for(const k of ["seed", "noise_seed"]) if(typeof ins[k] === "number") info.seeds.push({ id, k });
+  }
+  if(info.pos && info.neg && info.pos.id === info.neg.id) info.neg = null;
+  if(!info.pos){
+    const t = Object.entries(wf).filter(([, n]) => textKey(n));
+    if(t.length){ info.pos = { id: t[0][0], key: textKey(t[0][1]) }; if(t[1]) info.neg = { id: t[1][0], key: textKey(t[1][1]) }; }
+  }
+  const lat = info.dims.find(d => /latent/i.test(d.cls) && /video|ltx|hunyuan|wan|mochi|cosmos/i.test(d.cls)) || info.dims.find(d => /latent/i.test(d.cls)) || info.dims[0];
+  if(lat) info.base = { w: lat.w, h: lat.h };
+  if(!info.base && info.baseMP != null){ const a = Math.sqrt(info.baseMP * 1048576); info.base = { w: a * Math.sqrt(16/9), h: a / Math.sqrt(16/9) }; }
+  if(info.lens.length) info.baseLen = info.lens[0].v;
+  if(info.fps == null) info.fps = info.lens.length || info.dur ? 25 : null;
+  return info;
+}
+const hasLen = i => !!i && (i.lens.length > 0 || !!i.dur);
+const r32 = (x, min = 256) => Math.max(min, Math.round(x / 32) * 32);
+const RES_OPTS = ["1:1 (Square)", "2:3 (Portrait Photo)", "3:2 (Photo)", "3:4 (Portrait Standard)", "4:3 (Standard)", "9:16 (Portrait Widescreen)", "16:9 (Widescreen)", "21:9 (Ultrawide)"];
+function nearestAspect(r){
+  let best = RES_OPTS[0], d = 1e9;
+  for(const o of RES_OPTS){ const m = o.match(/^(\d+):(\d+)/); const dd = Math.abs(Math.log(m[1] / m[2] / r)); if(dd < d){ d = dd; best = o; } }
+  return best;
+}
+const curInfo = () => state.info[state.active[state.kind]];
+function firstImage(){ const i = curInfo(); if(!i) return null; const f = i.images.find(x => x.media === "image" && state.images[x.id]) || i.images.find(x => x.media === "video" && state.images[x.id]); return f ? state.images[f.id] : null; }
+function ratio(){
+  const a = state.aspect[state.kind], i = curInfo();
+  if(a === "img"){ const im = firstImage(); if(im) return im.w / im.h; return i && i.base ? i.base.w / i.base.h : 1; }
+  return (ASPECTS[a] || ASPECTS["1:1"]).r;
+}
+function dimsFor(f){ const i = curInfo(); if(!i || !i.base) return null; const area = i.base.w * i.base.h * f, r = ratio(); return { w: r32(Math.sqrt(area * r)), h: r32(Math.sqrt(area / r)) }; }
+function frames(){
+  const i = curInfo(), fps = i && i.fps || 25;
+  if(i && i.dur) return Math.round(state.seconds * fps) + 1;
+  return Math.max(9, Math.round(state.seconds * fps / 8) * 8 + 1);
+}
+function buildPrompt(names, seed){
+  const key = state.active[state.kind];
+  const wf = JSON.parse(JSON.stringify(state.wf[key])), info = state.info[key];
+  const text = $("#prompt").value.trim(), neg = $("#neg").value.trim();
+  const setText = (p, v) => { const ins = wf[p.id].inputs; ins[p.key] = v; for(const k of TEXT_KEYS) if(k !== p.key && typeof ins[k] === "string") ins[k] = v; };
+  if(info.pos) setText(info.pos, text);
+  if(info.neg && neg) setText(info.neg, neg);
+  const t = dimsFor(SIZES[state.size].f);
+  if(t && info.base && info.dims.length){
+    const sx = t.w / info.base.w, sy = t.h / info.base.h;
+    for(const d of info.dims){ wf[d.id].inputs.width = r32(d.w * sx, 64); wf[d.id].inputs.height = r32(d.h * sy, 64); }
+  }
+  if(info.res.length && info.baseMP != null){
+    const mp = Math.max(0.2, Math.round(info.baseMP * SIZES[state.size].f * 10) / 10);
+    for(const id of info.res){ wf[id].inputs.aspect_ratio = nearestAspect(ratio()); wf[id].inputs.megapixels = mp; }
+  }
+  if(state.kind === "video"){
+    if(info.dur) wf[info.dur.id].inputs.value = state.seconds;
+    else if(info.lens.length){
+      const f = frames();
+      for(const l of info.lens) wf[l.id].inputs[l.k] = l.v === info.baseLen ? f : Math.max(1, Math.round((l.v - 1) * (f - 1) / Math.max(1, info.baseLen - 1)) + 1);
+    }
+  }
+  if(state.kind === "image") for(const b of info.batch) wf[b.id].inputs.batch_size = state.batch;
+  if(info.enh) wf[info.enh.id].inputs.value = !!$("#enh").checked;
+  for(const s of info.seeds) wf[s.id].inputs[s.k] = seed;
+  for(const im of info.images) if(names[im.id]) wf[im.id].inputs[im.key] = names[im.id];
+  if(info.turbo) wf[info.turbo.id].inputs.value = !!$("#turbo").checked;
+  return wf;
+}
+
+/* ================= Navigation ================= */
+function showTab(t){
+  state.tab = t;
+  document.querySelectorAll(".nav button").forEach(b => b.classList.toggle("act", b.dataset.tab === t));
+  $("#studio").classList.toggle("hidden", !(t === "video" || t === "image"));
+  $("#gallery").classList.toggle("hidden", t !== "gal");
+  $("#models").classList.toggle("hidden", t !== "models");
+  $("#settings").classList.toggle("hidden", t !== "set");
+  if(t === "video" || t === "image"){ state.kind = t; renderStudio(); }
+  if(t === "gal") loadGallery();
+  if(t === "models") loadCatalog();
+  if(t === "set") renderSettings();
+  store.set("tab", t);
+}
+window.showTab = showTab;
+document.querySelectorAll(".nav button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+
+/* ================= Werkzeuge laden ================= */
+async function loadInstalled(){
+  const j = await api("/easy/installed");
+  state.installed = j.items || [];
+  for(const it of state.installed){
+    if(!state.wf[it.name]){
+      try{ const r = await fetch("/easy/workflow/" + encodeURIComponent(it.name), { cache: "no-store" }); if(r.ok){ state.wf[it.name] = await r.json(); state.info[it.name] = analyze(state.wf[it.name]); } }catch(e){}
+    }
+  }
+  for(const k of ["video", "image"]){
+    const list = toolsOf(k);
+    if(!list.find(t => t.name === state.active[k])) state.active[k] = (list.find(t => t.name === state.cfg.active?.[k]) || list[0] || {}).name || "";
+  }
+}
+const toolsOf = k => state.installed.filter(t => t.kind === k && t.enabled !== false && state.wf[t.name]);
+
+/* ================= Studio ================= */
+function chips(el, items, cur, onPick){
+  el.innerHTML = "";
+  for(const [k, v] of items){
+    const b = document.createElement("button");
+    b.className = "chip" + (k === cur ? " act" : ""); b.type = "button";
+    b.innerHTML = esc(v.n) + (v.sub ? `<small>${esc(v.sub)}</small>` : "");
+    b.onclick = () => onPick(k);
+    el.appendChild(b);
+  }
+}
+const prompts = store.get("prompts", {});
+function renderStudio(){
+  const k = state.kind, K = KIND[k], list = toolsOf(k);
+  $("#stTitle").textContent = K.title;
+  $("#stSub").textContent = k === "video" ? "Beschreibe eine Szene oder gib ein Startbild vor." : "Beschreibe dein Bild – oder lade ein Bild zum Bearbeiten hoch (je nach Modell).";
+  $("#noTool").classList.toggle("hidden", list.length > 0);
+  $("#studioBody").classList.toggle("hidden", !list.length);
+  if(!list.length){
+    const rec = state.catalog.length ? recommend(k) : [];
+    $("#noTool").innerHTML = `<h3>${K.icon} Noch kein ${K.one}-Modell installiert</h3>
+      <p class="hint" style="margin:0 0 12px">Wähle unter <b>Modelle</b> eins aus – es wird mit einem Klick heruntergeladen und eingerichtet.</p>
+      <div class="actions"><button class="btn pri" type="button" onclick="state.mKind='${k}';showTab('models')">Modelle ansehen</button></div>`;
+    if(!state.catalog.length) loadCatalog(true).then(() => { if(state.tab === k && !toolsOf(k).length) renderStudio(); });
+    else if(rec.length) $("#noTool").innerHTML += `<p class="hint" style="margin:14px 0 6px">Beliebt:</p><div class="actions">${rec.map(r => `<button class="btn" type="button" onclick="installTemplate('${esc(r.name)}')">${esc(r.title)} (~${GBf(r.size)})</button>`).join("")}</div>`;
+    return;
+  }
+  // Modell-Auswahl
+  const sel = $("#toolSel"); sel.innerHTML = "";
+  for(const t of list){ const o = document.createElement("option"); o.value = t.name; o.textContent = t.title + (t.ready === false ? "  (Modelle fehlen noch)" : ""); sel.appendChild(o); }
+  sel.value = state.active[k];
+  const tool = list.find(t => t.name === state.active[k]);
+  $("#notReady").classList.toggle("hidden", !tool || tool.ready !== false);
+  $("#notReady").innerHTML = "Für dieses Modell fehlen noch Dateien – sie werden gerade geladen oder der Download wurde unterbrochen. <a href='#' onclick=\"showTab('models');return false\">Zu den Modellen</a>";
+  const info = curInfo();
+  // Bild-Eingaben
+  const slots = $("#imgSlots"); slots.innerHTML = "";
+  for(const im of info.images){
+    const wrap = document.createElement("div");
+    const cur = state.images[im.id];
+    const isV = im.media === "video", isA = im.media === "audio";
+    const prev = cur && cur.audio ? `<audio src="${cur.url}" controls style="width:100%"></audio><span class="hint">${esc(cur.file.name)} – klicken zum Ändern</span>` : cur ? (cur.video ? `<video src="${cur.url}" muted style="max-width:100%;max-height:190px;border-radius:8px;display:block;margin:0 auto 6px"></video>` : `<img src="${cur.url}" alt="">`) + `<span class="hint">${cur.w}×${cur.h} – klicken zum Ändern</span>` : (isA ? "Audiodatei" : isV ? "Video" : "Bild") + " hierher ziehen oder <b>klicken</b>";
+    wrap.innerHTML = `<label class="l" style="margin-top:0">${esc(im.title)}</label><div class="drop">${prev}</div><input type="file" accept="${isA ? "audio/*" : isV ? "video/*" : "image/*"}" class="hidden">`;
+    const drop = wrap.querySelector(".drop"), inp = wrap.querySelector("input");
+    drop.onclick = () => inp.click();
+    drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+    drop.ondragleave = () => drop.classList.remove("over");
+    drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); if(e.dataTransfer.files[0]) setImage(im.id, e.dataTransfer.files[0]); };
+    inp.onchange = () => { if(inp.files[0]) setImage(im.id, inp.files[0]); };
+    slots.appendChild(wrap);
+  }
+  const needPrompt = !!info.pos;
+  ["#promptLbl", "#prompt", "#aiBtn"].forEach(s => $(s).classList.toggle("hidden", !needPrompt));
+  if(!needPrompt) $("#aiBox").classList.add("hidden");
+  $("#promptLbl").textContent = k === "video" ? (info.images.length ? "Was soll im Video passieren?" : "Beschreibe dein Video") : (info.images.length ? "Was soll am Bild passieren / entstehen?" : "Beschreibe dein Bild");
+  $("#prompt").placeholder = k === "video" ? "z. B. Eine Katze läuft durch einen verschneiten Wald, sanftes Morgenlicht, Kamera folgt langsam" : "z. B. Ein gemütliches Café in Paris bei Regen, warmes Licht, fotorealistisch";
+  $("#prompt").value = prompts[state.active[k]] ?? prompts[k] ?? "";
+  // Format & Größe
+  const canSize = !!info.base;
+  $("#fmtBox").classList.toggle("hidden", !canSize); $("#sizeBox").classList.toggle("hidden", !canSize);
+  if(canSize){
+    const hasVis = info.images.some(x => x.media !== "audio");
+    const aspects = Object.entries(ASPECTS).filter(([a]) => hasVis || a !== "img");
+    if(!aspects.find(([a]) => a === state.aspect[k])) state.aspect[k] = hasVis ? "img" : (k === "image" ? "1:1" : "16:9");
+    chips($("#aspect"), aspects, state.aspect[k], a => { state.aspect[k] = a; store.set("aspect", state.aspect); renderStudio(); });
+    chips($("#size"), Object.entries(SIZES).map(([s, v]) => { const d = dimsFor(v.f); return [s, { n: v.n, sub: d ? d.w + "×" + d.h : "" }]; }), state.size,
+      s => { state.size = s; store.set("size", s); renderStudio(); });
+  }
+  // Länge
+  const lenOk = k === "video" && hasLen(info);
+  $("#lenBox").classList.toggle("hidden", !lenOk);
+  if(lenOk){ $("#sec").value = state.seconds; $("#secTxt").textContent = state.seconds + " s"; $("#frameTxt").textContent = `(${frames()} Bilder bei ${info.fps} fps)`; }
+  // Anzahl
+  const batchOk = k === "image" && info.batch.length > 0;
+  $("#batchBox").classList.toggle("hidden", !batchOk);
+  if(batchOk) chips($("#batch"), [1, 2, 4].map(n => [n, { n: String(n) }]), state.batch, n => { state.batch = n; renderStudio(); });
+  $("#negBox").classList.toggle("hidden", !info.neg);
+  $("#enhRow").classList.toggle("hidden", !info.enh);
+  $("#turboRow").classList.toggle("hidden", !info.turbo);
+  if(info.turbo) $("#turboLbl").textContent = "Schnell-Modus (" + info.turbo.title + ")";
+  $("#go").textContent = k === "video" ? "Video erstellen" : (state.batch > 1 ? `${state.batch} Bilder erstellen` : "Bild erstellen");
+  updateGo();
+}
+function updateGo(){
+  const info = curInfo();
+  $("#go").disabled = !info || !!state.run || !online;
+  $("#goHint").textContent = !online ? "ComfyUI läuft nicht." : state.run ? "Es wird gerade etwas erstellt …" : (info && !info.pos ? "Dieses Werkzeug braucht keinen Text – einfach die Eingabe auswählen und starten." : "");
+}
+$("#toolSel").onchange = e => { state.active[state.kind] = e.target.value; api("/easy/config", { active: state.active }); renderStudio(); };
+$("#moreModels").onclick = () => { state.mKind = state.kind; showTab("models"); };
+$("#sec").oninput = e => { state.seconds = +e.target.value; store.set("sec", state.seconds); renderStudio(); };
+$("#prompt").oninput = e => { prompts[state.active[state.kind]] = e.target.value; prompts[state.kind] = e.target.value; store.set("prompts", prompts); };
+$("#seedRand").onchange = e => { $("#seed").disabled = e.target.checked; };
+
+function setImage(id, file){
+  const url = URL.createObjectURL(file);
+  if(/^video\//.test(file.type)){
+    const v = document.createElement("video"); v.preload = "metadata";
+    v.onloadedmetadata = () => { state.images[id] = { file, url, w: v.videoWidth || 16, h: v.videoHeight || 9, video: true, uploaded: null }; renderStudio(); };
+    v.onerror = () => { state.images[id] = { file, url, w: 16, h: 9, video: true, uploaded: null }; renderStudio(); };
+    v.src = url; return;
+  }
+  if(/^audio\//.test(file.type)){ state.images[id] = { file, url, w: 1, h: 1, audio: true, uploaded: null }; renderStudio(); return; }
+  if(!/^image\//.test(file.type)) return;
+  const im = new Image();
+  im.onload = () => { state.images[id] = { file, url, w: im.naturalWidth, h: im.naturalHeight, uploaded: null }; renderStudio(); };
+  im.src = url;
+}
+async function uploadImage(img){
+  if(img.uploaded) return img.uploaded;
+  const fd = new FormData();
+  fd.append("image", img.file, img.file.name || "bild.png"); fd.append("overwrite", "true");
+  const r = await fetch("/upload/image", { method: "POST", body: fd });
+  if(!r.ok) throw new Error("Bild-Upload fehlgeschlagen (" + r.status + ")");
+  const j = await r.json();
+  return img.uploaded = j.subfolder ? j.subfolder + "/" + j.name : j.name;
+}
+
+/* ================= Verbindung ================= */
+let online = false, ws = null;
+async function checkStatus(){
+  try{
+    const j = await (await fetch("/system_stats", { cache: "no-store" })).json();
+    const d = (j.devices || [])[0];
+    online = true; $("#dot").classList.add("on");
+    let t = "Bereit";
+    if(d && d.vram_total) t += ` · ${((d.vram_total - (d.vram_free || 0)) / 1073741824).toFixed(1)}/${(d.vram_total / 1073741824).toFixed(0)} GB`;
+    $("#statusTxt").textContent = t;
+    $("#statusTxt").title = d ? String(d.name || "") : "";
+  }catch(e){ online = false; $("#dot").classList.remove("on"); $("#statusTxt").textContent = "ComfyUI nicht erreichbar"; }
+  if(state.tab === "video" || state.tab === "image") updateGo();
+}
+function connectWS(){
+  try{
+    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws?clientId=" + cid);
+    ws.onmessage = e => { if(typeof e.data === "string"){ try{ onWS(JSON.parse(e.data)); }catch(err){} } };
+    ws.onclose = () => setTimeout(connectWS, 2000);
+  }catch(e){ setTimeout(connectWS, 3000); }
+}
+
+/* ================= Erstellen ================= */
+const fmtTime = s => { s = Math.floor(s); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+function showMsg(kind, text){ $("#out").innerHTML = `<div class="msg ${kind}"></div>`; $("#out").firstChild.textContent = text; }
+function friendly(text){
+  if(/out of memory|OOM|hipErrorOutOfMemory|not enough memory|allocate/i.test(text)) return text + "\n\n→ Zu wenig Grafikspeicher. Wähle „Schnell“, ein kürzeres Video oder ein kleineres Modell.";
+  if(/value_not_in_list|not in list|ckpt_name|unet_name|clip_name|vae_name|model_name/i.test(text)) return text + "\n\n→ Ein Modell fehlt. Unter „Modelle“ das Modell (erneut) installieren.";
+  if(/missing_node_type|does not exist|not found.*node/i.test(text)) return text + "\n\n→ Ein Baustein fehlt. Unter Einstellungen „ComfyUI aktualisieren“ ausführen.";
+  return text;
+}
+async function generate(){
+  const k = state.kind, key = state.active[k], info = curInfo();
+  if(!info) return;
+  if(!$("#prompt").value.trim() && info.pos){ showMsg("warn", "Bitte beschreibe zuerst, was entstehen soll."); return; }
+  const missingImg = info.images.find(im => !state.images[im.id]);
+  if(missingImg){ showMsg("warn", `Bitte zuerst „${missingImg.title}“ auswählen.`); return; }
+
+  $("#out").innerHTML = ""; $("#resActions").classList.add("hidden");
+  let seed;
+  if($("#seedRand").checked){ seed = Math.floor(Math.random() * 2 ** 48); $("#seed").value = seed; }
+  else seed = Math.max(0, parseInt($("#seed").value || "0", 10));
+  try{
+    const names = {};
+    for(const im of info.images) names[im.id] = await uploadImage(state.images[im.id]);
+    const wf = buildPrompt(names, seed);
+    const r = await fetch("/prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: wf, client_id: cid }) });
+    const j = await r.json().catch(() => ({}));
+    if(!r.ok || j.error){
+      const lines = [j.error && j.error.message || ("Fehler " + r.status)];
+      for(const ne of Object.values(j.node_errors || {})) for(const e of ne.errors || []) lines.push(`${ne.class_type}: ${e.message}${e.details ? " – " + e.details : ""}`);
+      showMsg("err", friendly(lines.join("\n"))); return;
+    }
+    state.run = { id: j.prompt_id, key, kind: k, start: Date.now(), total: Object.keys(wf).length, done: new Set(), step: 0, max: 0, finished: false, wf };
+    $("#progBox").classList.remove("hidden"); $("#progTxt").textContent = "In der Warteschlange …"; $("#bar").style.width = "2%";
+    tick(); updateGo();
+  }catch(e){ showMsg("err", friendly(String(e.message || e))); }
+}
+function tick(){
+  const run = state.run; if(!run) return;
+  $("#timeTxt").textContent = fmtTime((Date.now() - run.start) / 1000);
+  run.timer = setTimeout(tick, 1000);
+  if(!ws || ws.readyState !== 1){ if(!run.poll || Date.now() - run.poll > 3000){ run.poll = Date.now(); pollDone(); } }
+}
+function updateBar(){
+  const run = state.run; if(!run) return;
+  const pct = Math.min(99, ((run.done.size + (run.max ? run.step / run.max : 0)) / Math.max(1, run.total)) * 100);
+  $("#bar").style.width = Math.max(2, pct) + "%";
+}
+function onWS(m){
+  const run = state.run, d = m.data || {};
+  if(!run || (d.prompt_id && d.prompt_id !== run.id)) return;
+  if(m.type === "execution_start") $("#progTxt").textContent = "Läuft …";
+  if(m.type === "execution_cached") (d.nodes || []).forEach(n => run.done.add(String(n)));
+  if(m.type === "executing"){
+    if(d.node == null){ finish(); return; }
+    if(run.cur) run.done.add(run.cur);
+    run.cur = String(d.node); run.step = 0; run.max = 0;
+    const n = run.wf[run.cur];
+    $("#progTxt").textContent = "Arbeite: " + (n ? (n._meta && n._meta.title) || n.class_type : run.cur);
+  }
+  if(m.type === "progress"){ run.step = d.value; run.max = d.max; $("#progTxt").textContent = `Schritt ${d.value} von ${d.max}`; }
+  if(m.type === "execution_success") finish();
+  if(m.type === "execution_error"){ fail(friendly(`${d.node_type || ""}: ${d.exception_message || "Fehler"}`)); return; }
+  if(m.type === "execution_interrupted"){ fail("Abgebrochen."); return; }
+  updateBar();
+}
+async function pollDone(){
+  const run = state.run; if(!run) return;
+  try{
+    const j = await (await fetch("/history/" + run.id, { cache: "no-store" })).json();
+    const h = j[run.id];
+    if(h && h.status && h.status.completed) finish();
+    else if(h && h.status && h.status.status_str === "error") fail("Fehler beim Erstellen. Details stehen im ComfyUI-Protokoll.");
+  }catch(e){}
+}
+function endRun(){ const run = state.run; if(run) clearTimeout(run.timer); state.run = null; $("#progBox").classList.add("hidden"); updateGo(); }
+function fail(text){ endRun(); showMsg(text === "Abgebrochen." ? "warn" : "err", text); }
+async function finish(){
+  const run = state.run; if(!run || run.finished) return;
+  run.finished = true; $("#bar").style.width = "100%"; $("#progTxt").textContent = "Fertig – lade Ergebnis …";
+  let files = [];
+  for(let i = 0; i < 5 && !files.length; i++){
+    try{ const j = await (await fetch("/history/" + run.id, { cache: "no-store" })).json(); if(j[run.id]) files = mediaFiles(j[run.id].outputs); }catch(e){}
+    if(!files.length) await new Promise(r => setTimeout(r, 800));
+  }
+  const secs = (Date.now() - run.start) / 1000;
+  endRun();
+  if(!files.length){ showMsg("warn", "Fertig, aber keine Ausgabe gefunden. Schau in den Ausgabe-Ordner."); return; }
+  showResult(files);
+  showMsg("ok", `Fertig in ${fmtTime(secs)} Min.`);
+}
+function mediaFiles(outputs){
+  const res = [];
+  for(const out of Object.values(outputs || {})) for(const arr of Object.values(out))
+    if(Array.isArray(arr)) for(const f of arr) if(f && typeof f === "object" && f.filename && /\.(mp4|webm|mov|mkv|gif|webp|png|jpe?g)$/i.test(f.filename)) res.push(f);
+  const outs = res.filter(f => (f.type || "output") === "output");
+  return outs.length ? outs : res;
+}
+const isVideo = f => /\.(mp4|webm|mov|mkv)$/i.test(f.filename);
+const viewUrl = f => `/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder || "")}&type=${encodeURIComponent(f.type || "output")}`;
+function mediaEl(f, controls){
+  const el = document.createElement(isVideo(f) ? "video" : "img");
+  el.src = viewUrl(f);
+  if(isVideo(f)){ el.controls = controls; el.loop = true; el.playsInline = true; el.preload = "metadata"; }
+  else el.onclick = () => window.open(viewUrl(f), "_blank");
+  return el;
+}
+function showResult(files){
+  const v = $("#viewer"); v.innerHTML = "";
+  const vids = files.filter(isVideo), list = vids.length ? [vids[0]] : files;
+  v.classList.toggle("multi", list.length > 1);
+  for(const f of list){ const el = mediaEl(f, true); v.appendChild(el); if(isVideo(f)) el.play().catch(() => {}); }
+  $("#dl").href = viewUrl(list[0]); $("#dl").setAttribute("download", list[0].filename);
+  $("#resActions").classList.remove("hidden");
+}
+$("#go").onclick = generate;
+$("#again").onclick = () => { $("#seedRand").checked = true; $("#seed").disabled = true; generate(); };
+$("#stop").onclick = async () => {
+  const run = state.run; if(!run) return;
+  try{ await api("/queue", { delete: [run.id] }); }catch(e){}
+  try{ await fetch("/interrupt", { method: "POST" }); }catch(e){}
+  fail("Abgebrochen.");
+};
+
+/* ================= KI-Prompt-Helfer ================= */
+async function imageDataUrl(){
+  const im = firstImage(); if(!im || im.video) return null;
+  const el = new Image(); el.src = im.url; await el.decode();
+  const s = Math.min(1, 1024 / Math.max(el.naturalWidth, el.naturalHeight));
+  const c = document.createElement("canvas"); c.width = Math.round(el.naturalWidth * s); c.height = Math.round(el.naturalHeight * s);
+  c.getContext("2d").drawImage(el, 0, 0, c.width, c.height);
+  return c.toDataURL("image/jpeg", 0.85);
+}
+async function askAI(wish){
+  [$("#aiBtn"), $("#aiRedo")].forEach(b => b.disabled = true);
+  const old = $("#aiBtn").textContent; $("#aiBtn").textContent = "✨ Denke nach …";
+  try{
+    const base = wish && $("#aiOut").value.trim() ? $("#aiOut").value.trim() : $("#prompt").value.trim();
+    const tool = state.installed.find(t => t.name === state.active[state.kind]);
+    const j = await api("/easy/assist", { prompt: base, wish: wish || "", kind: state.kind, seconds: state.seconds, model: tool ? tool.title : "", image: await imageDataUrl() });
+    $("#aiBox").classList.remove("hidden");
+    if(j.error){ $("#aiOut").value = ""; $("#aiDe").innerHTML = `<div class="msg err">${esc(j.error)}\n→ Einstellungen: KI-Prompt-Helfer prüfen.</div>`; }
+    else { $("#aiOut").value = j.prompt; $("#aiDe").textContent = j.de || ""; }
+  }catch(e){ $("#aiBox").classList.remove("hidden"); $("#aiDe").textContent = "Fehler: " + (e.message || e); }
+  finally{ [$("#aiBtn"), $("#aiRedo")].forEach(b => b.disabled = false); $("#aiBtn").textContent = old; }
+}
+$("#aiBtn").onclick = () => { if(!$("#prompt").value.trim()){ showMsg("warn", "Tippe zuerst deine Idee ein – auf Deutsch und kurz ist okay."); return; } askAI(""); };
+$("#aiRedo").onclick = () => { const w = $("#aiWish").value.trim(); askAI(w || "Write a different variation."); $("#aiWish").value = ""; };
+$("#aiWish").onkeydown = e => { if(e.key === "Enter"){ e.preventDefault(); $("#aiRedo").click(); } };
+$("#aiUse").onclick = () => { const v = $("#aiOut").value.trim(); if(v){ $("#prompt").value = v; $("#prompt").dispatchEvent(new Event("input")); } $("#aiBox").classList.add("hidden"); };
+$("#aiClose").onclick = () => $("#aiBox").classList.add("hidden");
+
+/* ================= Galerie ================= */
+let galKind = "all";
+async function loadGallery(){
+  chips($("#galFilter"), [["all", { n: "Alle" }], ["video", { n: "Videos" }], ["image", { n: "Bilder" }]], galKind, k => { galKind = k; loadGallery(); });
+  const g = $("#gal"); g.innerHTML = `<div class="hint">Lade …</div>`;
+  try{
+    const j = await (await fetch("/history?max_items=80", { cache: "no-store" })).json();
+    const items = [];
+    for(const h of Object.values(j).reverse()) for(const f of mediaFiles(h.outputs)){
+      if((f.type || "output") !== "output") continue;
+      const v = isVideo(f) || /\.gif$/i.test(f.filename);
+      if(galKind === "all" || (galKind === "video") === v) items.push(f);
+    }
+    g.innerHTML = "";
+    if(!items.length){ g.innerHTML = `<div class="hint">Noch nichts erstellt.</div>`; return; }
+    for(const f of items){
+      const it = document.createElement("div"); it.className = "it";
+      it.appendChild(mediaEl(f, true));
+      const meta = document.createElement("div"); meta.className = "meta";
+      meta.innerHTML = `<span>${esc(f.filename)}</span><a href="${viewUrl(f)}" download="${esc(f.filename)}">Laden</a>`;
+      it.appendChild(meta); g.appendChild(it);
+    }
+  }catch(e){ g.innerHTML = `<div class="msg err">Galerie konnte nicht geladen werden.</div>`; }
+}
+$("#galReload").onclick = loadGallery;
+
+/* ================= Modelle ================= */
+async function loadCatalog(silent){
+  const j = await api("/easy/catalog");
+  state.catalog = j.items || [];
+  if(!silent || state.tab === "models") renderCatalog();
+}
+function recommend(k){ return state.catalog.filter(t => t.kind === k && !t.tool).sort((a, b) => b.usage - a.usage).slice(0, 3); }
+function dlItemsFor(name){ return (dlState.items || []).filter(x => x.template === name); }
+function renderCatalog(){
+  chips($("#mKind"), [["video", { n: "🎬 Video" }], ["image", { n: "🖼️ Bild" }]], state.mKind, k => { state.mKind = k; renderCatalog(); });
+  const q = $("#mSearch").value.trim().toLowerCase(), sort = $("#mSort").value, onlyInst = $("#mInst").checked;
+  let list = state.catalog.filter(t => t.kind === state.mKind);
+  if(q) list = list.filter(t => (t.title + " " + t.description + " " + t.tags.join(" ") + " " + t.models.join(" ")).toLowerCase().includes(q));
+  if(onlyInst) list = list.filter(t => t.installed);
+  list.sort((a, b) => (b.installed - a.installed) || (sort === "size" ? a.size - b.size : sort === "date" ? String(b.date).localeCompare(a.date) : b.usage - a.usage));
+  const inst = state.catalog.filter(t => t.installed && t.kind === state.mKind).length;
+  $("#mInfo").textContent = `${list.length} Vorlagen · ${inst} installiert · Größenangaben = Download beim ersten Installieren (gemeinsame Dateien werden nur einmal geladen).`;
+  const cat = $("#cat"); cat.innerHTML = "";
+  for(const t of list){
+    const d = document.createElement("div");
+    const items = dlItemsFor(t.name), loading = items.some(x => x.status === "loading" || x.status === "queued");
+    const ready = t.model_count === t.model_have;
+    let st, cls = "";
+    if(t.installed && ready){ st = "✓ installiert"; cls = "inst"; }
+    else if(loading) st = "⬇ wird geladen";
+    else if(t.installed) st = `⚠ ${t.model_have}/${t.model_count} Dateien`;
+    else if(ready && t.model_count) st = "Dateien vorhanden";
+    else st = "nicht installiert";
+    const pct = items.length ? items.reduce((a, x) => a + (x.got || 0), 0) / Math.max(1, items.reduce((a, x) => a + (x.size || 0), 0)) * 100 : 0;
+    d.className = "mc " + cls;
+    d.innerHTML = `<div class="th" style="background-image:url('${esc(t.thumb)}')"><span class="st">${st}</span></div>
+      <div class="bd"><div class="tt">${esc(t.title)}</div>
+      <div class="tags">${(t.models || []).slice(0, 3).map(m => `<span>${esc(m)}</span>`).join("")}${t.size ? `<span>~${GBf(t.size)}</span>` : ""}${t.license_note ? `<span style="color:var(--warn)" title="${esc(t.license_note)}">⚠ Lizenz: nicht in der EU</span>` : ""}</div>
+      <div class="ds">${esc(t.description)}</div>
+      ${loading ? `<div class="mbar"><div style="width:${pct.toFixed(1)}%"></div></div>` : ""}
+      <div class="ac"></div></div>`;
+    const ac = d.querySelector(".ac");
+    const btn = (txt, cls, fn) => { const b = document.createElement("button"); b.className = "btn " + (cls || ""); b.type = "button"; b.textContent = txt; b.onclick = fn; ac.appendChild(b); return b; };
+    if(!t.installed) btn("Installieren", "pri", () => installTemplate(t.name)).disabled = loading;
+    else {
+      if(ready) btn("Benutzen", "pri", () => { state.active[t.kind] = t.name; api("/easy/config", { active: state.active }); showTab(t.kind); });
+      else if(!loading) btn("Fehlende laden", "pri", () => installTemplate(t.name));
+      btn(t.enabled === false ? "Einblenden" : "Ausblenden", "", async () => { await api("/easy/enable/" + encodeURIComponent(t.name), { enabled: t.enabled === false }); await refreshAll(); });
+      btn("Entfernen", "danger", () => uninstallDialog(t));
+    }
+    cat.appendChild(d);
+  }
+}
+["#mSearch", "#mSort", "#mInst"].forEach(s => $(s).addEventListener("input", renderCatalog));
+
+let convFrame = null;
+async function comfyApp(){
+  if(!convFrame){
+    convFrame = document.createElement("iframe");
+    convFrame.style.cssText = "position:fixed;left:-6000px;top:0;width:1200px;height:800px;border:0";
+    convFrame.src = "/"; document.body.appendChild(convFrame);
+  }
+  const t0 = Date.now(); let app = null;
+  while(Date.now() - t0 < 120000){
+    try{ app = convFrame.contentWindow.app; if(app && app.graph && app.graphToPrompt && app.loadGraphData) break; }catch(e){}
+    app = null; await new Promise(r => setTimeout(r, 500));
+  }
+  if(!app) throw new Error("ComfyUI konnte im Hintergrund nicht geladen werden.");
+  if(!convFrame.ready){ await new Promise(r => setTimeout(r, 2500)); convFrame.ready = true; }
+  return app;
+}
+async function fetchTemplate(name){
+  for(const u of ["/templates/" + name + ".json", "/easy/template/" + name]){
+    try{ const r = await fetch(u, { cache: "no-store" }); if(r.ok) return await r.json(); }catch(e){}
+  }
+  throw new Error("Vorlage nicht gefunden: " + name);
+}
+let convChain = Promise.resolve();
+function convertTemplate(name){
+  const job = convChain.then(async () => {
+    const app = await comfyApp();
+    await app.loadGraphData(await fetchTemplate(name), true, false);
+    const p = await app.graphToPrompt();
+    if(!p || !p.output || !Object.keys(p.output).length) throw new Error("Umwandlung lieferte keinen Ablauf.");
+    return p.output;
+  });
+  convChain = job.catch(() => {});
+  return job;
+}
+function toast(html, kind, ms){
+  const d = document.createElement("div"); d.className = "msg " + (kind || "ok");
+  d.style.cssText = "position:fixed;right:18px;bottom:18px;z-index:60;max-width:420px;box-shadow:0 8px 30px #0008";
+  d.innerHTML = html; document.body.appendChild(d); setTimeout(() => d.remove(), ms || 6000);
+}
+function confirmLicense(t){
+  return new Promise(res => {
+    $("#modalCard").innerHTML = `<h3>⚠ Lizenzhinweis</h3><p class="hint">${esc(t.license_note)}</p>
+      <div class="actions" style="margin-top:14px"><button class="btn" id="mOk">Verstanden, trotzdem installieren</button><button class="btn pri" id="mCancel">Abbrechen</button></div>`;
+    $("#modal").classList.remove("hidden");
+    $("#mCancel").onclick = () => { $("#modal").classList.add("hidden"); res(false); };
+    $("#mOk").onclick = () => { $("#modal").classList.add("hidden"); res(true); };
+  });
+}
+async function installTemplate(name){
+  const t = state.catalog.find(x => x.name === name) || { name, title: name, kind: state.kind };
+  if(t.license_note && !(await confirmLicense(t))) return;
+  toast(`⏳ Richte „${esc(t.title)}“ ein …`, "warn", 4000);
+  try{
+    const prep = await api("/easy/models/prepare", { templates: [name] });
+    if(prep.error) throw new Error(prep.error);
+    const moved = (prep.models || []).filter(m => m.status === "moved");
+    const wf = await convertTemplate(name);
+    const s = await api("/easy/workflow/" + encodeURIComponent(name), { workflow: wf, meta: { title: t.title, kind: t.kind, thumb: t.thumb, description: t.description } });
+    if(s.error) throw new Error(s.error);
+    state.wf[name] = wf; state.info[name] = analyze(wf);
+    const missing = (prep.models || []).filter(m => m.status === "missing");
+    if(missing.length){
+      const d = await api("/easy/models/download", { models: missing, template: name });
+      if(d.error) throw new Error(d.error);
+      toast(`⬇ „${esc(t.title)}“: ${missing.length} Datei(en) werden geladen.${moved.length ? ` ${moved.length} vorhandene eingesortiert.` : ""}`, "ok");
+      watchDownload();
+    } else toast(`✅ „${esc(t.title)}“ ist bereit!${moved.length ? ` (${moved.length} Datei(en) aus dem Download-Ordner eingesortiert)` : ""}`, "ok");
+    if(!state.active[t.kind]){ state.active[t.kind] = name; api("/easy/config", { active: state.active }); }
+    await refreshAll();
+  }catch(e){ toast("❌ " + esc(e.message || e), "err", 10000); }
+}
+async function uninstallDialog(t){
+  const p = await api("/easy/uninstall_preview/" + encodeURIComponent(t.name));
+  const own = (p.models || []).filter(m => !m.shared && m.present);
+  $("#modalCard").innerHTML = `<h3>„${esc(t.title)}“ entfernen?</h3>
+    <p class="hint">Das Werkzeug verschwindet aus der Liste.${own.length ? ` Zusätzlich kannst du die Modelldateien löschen, die nur dieses Werkzeug braucht (<b>${GBf(p.freed)}</b>):` : " Es gibt keine Dateien, die nur hiervon genutzt werden."}</p>
+    ${own.length ? `<div class="hint" style="max-height:140px;overflow:auto;margin-bottom:8px">${own.map(m => "• " + esc(m.name)).join("<br>")}</div><label class="row" style="gap:8px"><input type="checkbox" id="delFiles" checked> Dateien löschen und Speicher freigeben</label>` : ""}
+    <div class="actions" style="margin-top:14px"><button class="btn danger" id="mOk">Entfernen</button><button class="btn" id="mCancel">Abbrechen</button></div>`;
+  $("#modal").classList.remove("hidden");
+  $("#mCancel").onclick = () => $("#modal").classList.add("hidden");
+  $("#mOk").onclick = async () => {
+    const del = !!($("#delFiles") && $("#delFiles").checked);
+    const r = await api("/easy/uninstall/" + encodeURIComponent(t.name), { delete_models: del });
+    $("#modal").classList.add("hidden");
+    delete state.wf[t.name]; delete state.info[t.name];
+    toast(`🗑 „${esc(t.title)}“ entfernt${r.freed ? ` – ${GBf(r.freed)} frei` : ""}.`, "ok");
+    await refreshAll();
+  };
+}
+let dlState = {}, dlTimer = null;
+async function watchDownload(){
+  clearTimeout(dlTimer);
+  try{ dlState = await api("/easy/models/status"); }catch(e){ dlTimer = setTimeout(watchDownload, 3000); return; }
+  const s = dlState, active = (s.items || []).filter(x => x.status === "loading" || x.status === "queued");
+  $("#dlPanel").classList.toggle("hidden", !s.running && !(s.errors || []).length);
+  $("#dlBadge").classList.toggle("hidden", !s.running);
+  if(s.running){
+    const pct = s.total ? s.got / s.total * 100 : 0;
+    $("#dlBar").style.width = Math.max(1, pct) + "%";
+    $("#dlBadge").textContent = Math.floor(pct) + "%";
+    $("#dlTxt").textContent = `Lade ${active.length} Datei(en) · ${GBf(s.got)} / ${s.total ? GBf(s.total) : "?"}`;
+    const left = s.speed > 0 && s.total ? (s.total - s.got) / s.speed : 0;
+    $("#dlEta").textContent = s.speed ? `${(s.speed / 1048576).toFixed(1)} MB/s` + (left ? ` · noch ca. ${left > 3600 ? (left / 3600).toFixed(1) + " Std." : Math.ceil(left / 60) + " Min."}` : "") : "";
+    $("#dlFile").textContent = s.current;
+    $("#dlStop").classList.remove("hidden");
+  } else $("#dlStop").classList.add("hidden");
+  $("#dlErr").innerHTML = (s.errors || []).length ? `<div class="msg err" style="margin-top:8px">${s.errors.map(esc).join("\n")}\n<button class="btn" type="button" id="dlRetry" style="margin-top:6px">Erneut versuchen</button></div>` : "";
+  if($("#dlRetry")) $("#dlRetry").onclick = async () => {
+    const retry = (s.items || []).filter(x => x.status === "error" || x.status === "paused");
+    const byT = {}; for(const x of retry) (byT[x.template] = byT[x.template] || []).push(x.template);
+    for(const t of Object.keys(byT)) await installTemplate(t);
+  };
+  if(state.tab === "models") renderCatalog();
+  if(s.running) dlTimer = setTimeout(watchDownload, 1000);
+  else if(watchDownload.was){ watchDownload.was = false; await refreshAll(); }
+  if(s.running) watchDownload.was = true;
+}
+$("#dlStop").onclick = () => api("/easy/models/cancel", {});
+async function refreshAll(){
+  await loadInstalled();
+  await loadCatalog(true);
+  if(state.tab === "models") renderCatalog();
+  if(state.tab === "video" || state.tab === "image") renderStudio();
+}
+
+/* ================= Einstellungen ================= */
+async function renderSettings(){
+  state.cfg = await api("/easy/config");
+  // KI
+  const PROV = [["ollama", { n: "Lokal (Ollama)", sub: "kostenlos, privat" }], ["claude", { n: "Claude", sub: "beste Qualität" }]];
+  const pickProv = k => { state.cfg.provider = k; $("#provOllama").classList.toggle("hidden", k !== "ollama"); $("#provClaude").classList.toggle("hidden", k !== "claude"); chips($("#provChips"), PROV, k, pickProv); };
+  chips($("#provChips"), PROV, state.cfg.provider, pickProv);
+  $("#provOllama").classList.toggle("hidden", state.cfg.provider !== "ollama");
+  $("#provClaude").classList.toggle("hidden", state.cfg.provider !== "claude");
+  $("#keyHint").textContent = state.cfg.claude_key_set ? "(gespeichert " + state.cfg.claude_key_hint + " – leer lassen zum Behalten)" : "";
+  $("#clModel").value = state.cfg.claude_model || "claude-haiku-5-5";
+  $("#hfHint").textContent = state.cfg.hf_token_set ? " gespeichert ✓" : "";
+  loadOllama();
+  // Programm & ComfyUI (nur im Easy-Generate-Programm)
+  if(host){
+    const info = await host.getInfo();
+    $("#appInfo").innerHTML = `Easy Generate <b>${esc(info.version)}</b>`;
+    $("#comfyInfo").innerHTML = `Ordner: <code>${esc(info.comfyRoot || "?")}</code><br>${info.managed ? "Wird von Easy Generate verwaltet." : "Eigenes ComfyUI (extern)."}`;
+    $("#cUpd").classList.toggle("hidden", !info.canUpdateComfy);
+    chips($("#closeChips"), [["ask", { n: "Jedes Mal fragen" }], ["always", { n: "ComfyUI immer mit schließen" }], ["never", { n: "ComfyUI weiterlaufen lassen" }]], info.closeMode,
+      async m => { await host.setCloseMode(m); renderSettings(); });
+  } else {
+    $("#appCard").classList.add("hidden"); $("#closeCard").classList.add("hidden");
+    $("#comfyInfo").textContent = "Diese Seite läuft im Browser. Öffne Easy Generate als Programm für Updates und Verwaltung.";
+    ["#cUpd", "#cRestart", "#cOut", "#cModels", "#cChange"].forEach(s => $(s).classList.add("hidden"));
+  }
+}
+async function loadOllama(){
+  const sel = $("#olModel"); $("#olMsg").textContent = "Suche Modelle …";
+  const j = await api("/easy/ollama_models");
+  sel.innerHTML = "";
+  for(const m of j.models || []){ const o = document.createElement("option"); o.value = o.textContent = m; sel.appendChild(o); }
+  if(state.cfg.ollama_model && (j.models || []).includes(state.cfg.ollama_model)) sel.value = state.cfg.ollama_model;
+  $("#olMsg").textContent = j.error ? "Ollama läuft nicht – bitte Ollama starten." : (j.models || []).length ? `${j.models.length} Modell(e) gefunden.` : "Noch kein Modell installiert (siehe Befehl oben).";
+}
+$("#olReload").onclick = loadOllama;
+$("#aiSave").onclick = async () => {
+  state.cfg = await api("/easy/config", { provider: state.cfg.provider, ollama_model: $("#olModel").value || "", claude_model: $("#clModel").value, claude_key: $("#clKey").value });
+  $("#clKey").value = ""; $("#aiSetMsg").innerHTML = `<div class="msg ok">Gespeichert.</div>`; renderSettings();
+};
+$("#hfSave").onclick = async () => { await api("/easy/config", { hf_token: $("#hfTok").value }); $("#hfTok").value = ""; renderSettings(); };
+$("#cuFile").onchange = async e => {
+  const f = e.target.files[0]; if(!f) return;
+  const msg = h => $("#cuMsg").innerHTML = h;
+  let wf; try{ wf = JSON.parse(await f.text()); }catch(err){ msg(`<div class="msg err">Keine gültige JSON-Datei.</div>`); return; }
+  if(wf && Array.isArray(wf.nodes)){ msg(`<div class="msg err">Das ist das normale Format. Bitte in ComfyUI „Export (API)“ verwenden.</div>`); return; }
+  if(!wf || !Object.values(wf).length || !Object.values(wf).every(n => n && n.class_type)){ msg(`<div class="msg err">Kein API-Ablauf erkannt.</div>`); return; }
+  const title = $("#cuName").value.trim() || f.name.replace(/\.json$/i, "");
+  const name = "custom_" + title.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 40) + "_" + Date.now().toString(36);
+  const r = await api("/easy/workflow/" + name, { workflow: wf, meta: { title, kind: $("#cuKind").value, custom: true } });
+  if(r.error){ msg(`<div class="msg err">${esc(r.error)}</div>`); return; }
+  msg(`<div class="msg ok">„${esc(title)}“ hinzugefügt.</div>`); e.target.value = ""; refreshAll();
+};
+if(host){
+  $("#chkUpd").onclick = async () => {
+    $("#updMsg").innerHTML = `<span class="hint">Suche …</span>`;
+    const r = await host.checkForUpdates();
+    if(r.error) $("#updMsg").innerHTML = `<div class="msg err">${esc(r.error)}</div>`;
+    else if(r.available) showUpdate(r.version);
+    else $("#updMsg").innerHTML = `<div class="msg ok">Du hast die neueste Version.</div>`;
+  };
+  $("#cUpd").onclick = async () => {
+    if(state.run){ $("#cMsg").innerHTML = `<div class="msg warn">Bitte warten, bis die aktuelle Erstellung fertig ist.</div>`; return; }
+    $("#cMsg").innerHTML = `<div class="msg warn">ComfyUI wird aktualisiert und neu gestartet – das Fenster lädt danach neu …</div>`;
+    const r = await host.updateComfy();
+    if(r && r.error) $("#cMsg").innerHTML = `<div class="msg err">${esc(r.error)}</div>`;
+  };
+  $("#cRestart").onclick = () => host.restartComfy();
+  $("#cOut").onclick = () => host.openPath("output");
+  $("#cModels").onclick = () => host.openPath("models");
+  $("#cChange").onclick = () => host.changeComfy();
+  host.onUpdate(u => {
+    if(u.status === "available") showUpdate(u.version);
+    if(u.status === "progress"){ $("#updBtn").classList.remove("hidden"); $("#updBtn").textContent = `⬇ Update wird geladen … ${Math.floor(u.percent || 0)}%`; }
+    if(u.status === "ready"){ $("#updBtn").classList.remove("hidden"); $("#updBtn").textContent = "✅ Update bereit – jetzt neu starten"; $("#updBtn").onclick = () => host.installUpdate(); }
+    if(u.status === "error"){ $("#updBtn").classList.remove("hidden"); $("#updBtn").textContent = "Update-Fehler – erneut versuchen"; $("#updBtn").onclick = () => host.downloadUpdate(); }
+  });
+}
+function showUpdate(v){
+  $("#updBtn").classList.remove("hidden");
+  $("#updBtn").textContent = `⬆ Update ${v} verfügbar – installieren`;
+  $("#updBtn").onclick = () => { host.downloadUpdate(); $("#updBtn").textContent = "⬇ Update wird geladen …"; };
+  $("#updMsg").innerHTML = `<div class="msg ok">Version ${esc(v)} ist verfügbar. <button class="btn pri" type="button" onclick="host.downloadUpdate()">Jetzt laden</button></div>`;
+}
+
+/* ================= Start ================= */
+(async () => {
+  state.cfg = await api("/easy/config");
+  if(state.cfg.active) state.active = Object.assign({ video: "", image: "" }, state.cfg.active);
+  await checkStatus(); setInterval(checkStatus, 5000);
+  connectWS();
+  await loadInstalled();
+  if(host){ try{ const i = await host.getInfo(); $("#verTxt").textContent = "Version " + i.version; }catch(e){} }
+  let t = store.get("tab", "video");
+  if(!["video", "image", "gal", "models", "set"].includes(t)) t = "video";
+  showTab(t);
+  watchDownload();
+  loadCatalog(true);
+})();
+</script>
+</body>
+</html>

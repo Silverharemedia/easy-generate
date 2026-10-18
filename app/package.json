@@ -1,0 +1,85 @@
+{
+ "name": "easy-generate",
+ "version": "1.0.0",
+ "description": "Einfache Bild- und Videogenerierung mit ComfyUI",
+ "main": "main.js",
+ "scripts": {
+  "start": "electron .",
+  "dist": "electron-builder --win nsis --x64"
+ },
+ "author": "Silverharemedia",
+ "license": "MIT",
+ "devDependencies": {
+  "electron": "^44.9.0",
+  "electron-builder": "^26.15.3"
+ },
+ "dependencies": {
+  "7zip-bin": "^5.2.0",
+  "electron-updater": "^6.8.9"
+ },
+ "productName": "Easy Generate",
+ "build": {
+  "appId": "de.silverharemedia.easygenerate",
+  "productName": "Easy Generate",
+  "artifactName": "Easy-Generate-Setup-${version}.${ext}",
+  "files": [
+   "main.js",
+   "preload.js",
+   "setup.html",
+   "build/icon.ico",
+   "package.json"
+  ],
+  "extraResources": [
+   {
+    "from": "comfy-node",
+    "to": "comfy-node",
+    "filter": [
+     "**/*",
+     "!**/__pycache__/**",
+     "!**/data/**"
+    ]
+   }
+  ],
+  "asarUnpack": [
+   "node_modules/7zip-bin/**"
+  ],
+  "win": {
+   "target": [
+    {
+     "target": "nsis",
+     "arch": [
+      "x64"
+     ]
+    }
+   ],
+   "icon": "build/icon.ico"
+  },
+  "nsis": {
+   "oneClick": false,
+   "perMachine": false,
+   "allowToChangeInstallationDirectory": true,
+   "createDesktopShortcut": true,
+   "createStartMenuShortcut": true,
+   "shortcutName": "Easy Generate",
+   "runAfterFinish": true,
+   "installerIcon": "build/icon.ico",
+   "uninstallerIcon": "build/icon.ico",
+   "installerLanguages": [
+    "de_DE"
+   ],
+   "language": "1031",
+   "deleteAppDataOnUninstall": false
+  },
+  "publish": [
+   {
+    "provider": "github",
+    "owner": "Silverharemedia",
+    "repo": "easy-generate",
+    "releaseType": "release"
+   }
+  ],
+  "directories": {
+   "output": "dist"
+  }
+ }
+}

@@ -1,0 +1,31 @@
+// Stellt der Oberfläche eine kleine, sichere Schnittstelle zum Programm bereit.
+"use strict";
+const { contextBridge, ipcRenderer } = require("electron");
+const on = (ch, cb) => { const f = (e, d) => cb(d); ipcRenderer.on(ch, f); return () => ipcRenderer.removeListener(ch, f); };
+
+contextBridge.exposeInMainWorld("easyApp", {
+  getInfo: () => ipcRenderer.invoke("app:info"),
+  setCloseMode: m => ipcRenderer.invoke("app:setCloseMode", m),
+  checkForUpdates: () => ipcRenderer.invoke("app:checkUpdates"),
+  downloadUpdate: () => ipcRenderer.invoke("app:downloadUpdate"),
+  installUpdate: () => ipcRenderer.invoke("app:installUpdate"),
+  onUpdate: cb => on("app:update", cb),
+  openPath: w => ipcRenderer.invoke("app:openPath", w),
+  restartComfy: () => ipcRenderer.invoke("app:restartComfy"),
+  updateComfy: () => ipcRenderer.invoke("app:updateComfy"),
+  changeComfy: () => ipcRenderer.invoke("app:changeComfy"),
+  setup: {
+    state: () => ipcRenderer.invoke("setup:state"),
+    detect: () => ipcRenderer.invoke("setup:detect"),
+    chooseFolder: s => ipcRenderer.invoke("setup:chooseFolder", s),
+    chooseExisting: () => ipcRenderer.invoke("setup:chooseExisting"),
+    freeSpace: f => ipcRenderer.invoke("setup:freeSpace", f),
+    useExisting: s => ipcRenderer.invoke("setup:useExisting", s),
+    install: o => ipcRenderer.invoke("setup:install", o),
+    retry: () => ipcRenderer.invoke("setup:retry"),
+    log: () => ipcRenderer.invoke("setup:log"),
+    onStatus: cb => on("setup:status", cb),
+    onError: cb => on("setup:error", cb),
+    onWizard: cb => on("setup:wizard", cb),
+  },
+});
