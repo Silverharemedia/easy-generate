@@ -24,6 +24,7 @@ const PACKAGES = {
 const RELEASE_BASE = "https://github.com/comfyanonymous/ComfyUI/releases/latest/download/";
 
 let win = null, cfg = null, quitting = false, comfyChild = null, updateReady = false, stoppedAt = 0, crashes = [], restarting = false;
+let wizardOpen = false, winClosing = false, uiActive = false;   // für den Absturz-Wächter
 
 // ------------------------------------------------------------------ Konfiguration
 function loadCfg() {
@@ -66,6 +67,7 @@ async function pidOnPort(port) {
 }
 async function killComfy() {
   stoppedAt = Date.now();                              // gewolltes Beenden – kein Absturz
+  if (comfyChild) comfyChild.intentional = true;
   const port = cfg.comfy && cfg.comfy.port;
   const pids = new Set();
   if (comfyChild && comfyChild.pid) pids.add(comfyChild.pid);
@@ -235,7 +237,13 @@ async function freePort(start) {
   }
   return start;
 }
-function tailLog(n = 4000) { try { const s = fs.readFileSync(LOG_FILE(), "utf8"); return s.slice(-n); } catch (e) { return ""; } }
+function tailLog(n = 4000) {
+  try {   // nur das Ende der Datei lesen (das Protokoll kann groß werden)
+    const fd = fs.openSync(LOG_FILE(), "r");
+    try { const size = fs.fstatSync(fd).size, len = Math.min(size, n * 2); const buf = Buffer.alloc(len); fs.readSync(fd, buf, 0, len, size - len); return buf.toString("utf8").slice(-n); }
+    finally { fs.closeSync(fd); }
+  } catch (e) { return ""; }
+}
 
 async function startComfy() {
   const c = cfg.comfy;
@@ -285,28 +293,49 @@ function crashReason(log) {
 }
 function watchComfy(child) {
   if (!child) return;
-  child.on("exit", code => {
-    if (quitting || child !== comfyChild || Date.now() - stoppedAt < 30000) return;   // gewollt beendet
-    const log = tailLog(20000);
-    try { fs.writeFileSync(path.join(app.getPath("userData"), "comfyui-crash.log"), log); } catch (e) {}
-    const r = crashReason(log);
-    crashes = crashes.filter(t => Date.now() - t < 5 * 60 * 1000); crashes.push(Date.now());
-    cfg.lastCrash = { at: Date.now(), code, reason: r.kind, model: r.model, auto: crashes.length < 3 }; saveCfg();
-    comfyChild = null;
-    send("comfy:crashed", cfg.lastCrash);
-    if (crashes.length < 3) restartAfterCrash();   // mehrfach hintereinander: nicht endlos neu starten
+  child.on("exit", async code => {
+    if (child === comfyChild) { comfyChild = null; cfg.comfyPid = null; saveCfg(); }
+    if (quitting || child.intentional) return;                  // gewollt beendet
+    if (code === 0) {                                           // z. B. Neustart durch ComfyUI-Manager: kurz abwarten
+      for (let i = 0; i < 10; i++) { await sleep(1000); if (cfg.comfy && await comfyAt(cfg.comfy.port)) return; }
+    }
+    onComfyGone(code);
   });
 }
+// ComfyUI ist weg (Absturz oder nicht mehr erreichbar): melden, Protokoll sichern, neu starten
+let pendingGone = false;
+function onComfyGone(code) {
+  if (restarting) { pendingGone = true; return; }       // stürzt während des Neustarts ab: danach nochmal prüfen
+  if (quitting || winClosing || wizardOpen) return;
+  const log = tailLog(20000);
+  try { fs.writeFileSync(path.join(app.getPath("userData"), "comfyui-crash.log"), log); } catch (e) {}
+  const r = crashReason(log);
+  crashes = crashes.filter(t => Date.now() - t < 5 * 60 * 1000); crashes.push(Date.now());
+  cfg.lastCrash = { at: Date.now(), code: code == null ? null : code, reason: r.kind, model: r.model, auto: crashes.length < 3 }; saveCfg();
+  send("comfy:crashed", cfg.lastCrash);
+  if (crashes.length < 3) restartAfterCrash();   // mehrfach hintereinander: nicht endlos neu starten
+}
+// Auch ein ComfyUI, das nicht von uns gestartet wurde (lief noch vom letzten Mal), wird überwacht
+let pollFails = 0;
+setInterval(async () => {
+  if (!cfg || !cfg.comfy || comfyChild || quitting || winClosing || wizardOpen || restarting || !uiActive || Date.now() - stoppedAt < 30000) { pollFails = 0; return; }
+  if (await comfyAt(cfg.comfy.port)) { pollFails = 0; return; }
+  if (++pollFails >= 3) { pollFails = 0; onComfyGone(null); }
+}, 5000);
 async function restartAfterCrash() {
   if (restarting) return;
   restarting = true;
   try {
     await sleep(1500);
+    if (quitting || winClosing) return;
     await startComfy();
-    if (win && !win.isDestroyed()) await win.loadURL(`http://127.0.0.1:${cfg.comfy.port}/easy`);
+    if (win && !win.isDestroyed() && !winClosing) { await win.loadURL(`http://127.0.0.1:${cfg.comfy.port}/easy`); uiActive = true; }
   } catch (e) {
-    if (win && !win.isDestroyed()) { await win.loadFile(path.join(__dirname, "setup.html")); send("setup:error", { message: String(e.message || e) }); }
-  } finally { restarting = false; }
+    if (win && !win.isDestroyed()) { uiActive = false; await win.loadFile(path.join(__dirname, "setup.html")); send("setup:error", { message: String(e.message || e) }); }
+  } finally {
+    restarting = false;
+    if (pendingGone) { pendingGone = false; if (!(cfg.comfy && await comfyAt(cfg.comfy.port))) onComfyGone(null); }
+  }
 }
 
 async function launch() {
@@ -314,7 +343,9 @@ async function launch() {
     status("Starte die KI im Hintergrund …", { phase: "start" });
     await startComfy();
     await win.loadURL(`http://127.0.0.1:${cfg.comfy.port}/easy`);
+    uiActive = true;
   } catch (e) {
+    uiActive = false;
     await win.loadFile(path.join(__dirname, "setup.html"));
     send("setup:error", { message: String(e.message || e) });
   }
@@ -340,6 +371,7 @@ function initUpdater() {
 async function updateComfy() {
   const c = cfg.comfy;
   if (!c || !c.portable) return { error: "Nur für das von Easy Generate installierte ComfyUI möglich." };
+  uiActive = false;
   await win.loadFile(path.join(__dirname, "setup.html"));
   status("Aktualisiere ComfyUI …", { phase: "update" });
   await killComfy();
@@ -383,7 +415,7 @@ function createWindow() {
     if (quitting) return;
     e.preventDefault();
     if (closing) { forceQuit(); return; }               // zweiter Klick aufs Kreuz: sofort beenden
-    closing = true;
+    closing = true; winClosing = true;
     let close = cfg.closeMode === "always";
     const running = cfg.comfy && await comfyAt(cfg.comfy.port);
     if (running && cfg.closeMode === "ask") {
@@ -556,9 +588,15 @@ ipcMain.handle("app:openPath", (e, which) => {
   return true;
 });
 ipcMain.handle("app:lastCrash", () => cfg.lastCrash || null);
-ipcMain.handle("app:restartComfy", async () => { await win.loadFile(path.join(__dirname, "setup.html")); await killComfy(); await launch(); return true; });
+ipcMain.handle("app:restartComfy", async () => {
+  if (restarting) return true;                       // läuft schon ein Neustart (z. B. nach Absturz)
+  restarting = true; uiActive = false;
+  try { await win.loadFile(path.join(__dirname, "setup.html")); await killComfy(); await launch(); }
+  finally { restarting = false; }
+  return true;
+});
 ipcMain.handle("app:updateComfy", () => updateComfy());
-ipcMain.handle("app:changeComfy", async () => { await win.loadFile(path.join(__dirname, "setup.html")); send("setup:wizard", {}); return true; });
+ipcMain.handle("app:changeComfy", async () => { wizardOpen = true; uiActive = false; await win.loadFile(path.join(__dirname, "setup.html")); send("setup:wizard", {}); return true; });
 
 // Einrichtungsassistent
 ipcMain.handle("setup:state", async () => ({ hasComfy: !!(cfg.comfy && cfg.comfy.comfyDir && exists(cfg.comfy.comfyDir)), version: app.getVersion() }));
@@ -583,14 +621,16 @@ ipcMain.handle("setup:freeSpace", async (e, folder) => {
   try { let p = folder; while (p && !exists(p)) p = path.dirname(p); const s = fs.statfsSync(p); return s.bavail * s.bsize; } catch (e) { return null; }
 });
 ipcMain.handle("setup:useExisting", async (e, sel) => {
+  await killComfy();                                   // das bisherige ComfyUI beenden, sonst würde es einfach weiterbenutzt
+  wizardOpen = false;
   cfg.comfy = { comfyDir: sel.comfyDir, python: sel.python, managed: false, portable: exists(path.join(path.dirname(sel.comfyDir), "update", "update.py")) ? path.dirname(sel.comfyDir) : null, port: 8188 };
   saveCfg(); await launch(); return true;
 });
 ipcMain.handle("setup:install", async (e, opts) => {
-  try { await installComfy(opts); await launch(); return { ok: true }; }
+  try { wizardOpen = true; await killComfy(); await installComfy(opts); wizardOpen = false; await launch(); return { ok: true }; }
   catch (err) { return { error: String(err.message || err) }; }
 });
-ipcMain.handle("setup:retry", async () => { await launch(); return true; });
+ipcMain.handle("setup:retry", async () => { wizardOpen = false; await launch(); return true; });
 ipcMain.handle("setup:log", () => tailLog(6000));
 
 // ------------------------------------------------------------------ Ollama (Prompt-Helfer)

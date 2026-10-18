@@ -854,8 +854,16 @@
   }
   // russische Mehrzahl: 1 ядро, 2–4 ядра, 5+ ядер
   function ruPl(n, one, few, many) { n = Math.abs(+n) % 100; const d = n % 10; if (n > 10 && n < 20) return many; if (d === 1) return one; if (d >= 2 && d <= 4) return few; return many; }
+  const CACHE = new Map();
   function tr(s) {
     if (lang === "de" || !s) return s;
+    if (CACHE.has(s)) return CACHE.get(s);
+    const out = tr0(s);
+    if (CACHE.size > 3000) CACHE.clear();
+    CACHE.set(s, out);
+    return out;
+  }
+  function tr0(s) {
     const lead = s.match(/^\s*/)[0], trail = s.match(/\s*$/)[0];
     const core = s.trim().replace(/\s+/g, " ");
     if (!core) return s;
@@ -871,7 +879,7 @@
   }
   function walk(root) {
     if (lang === "de" || !root) return;
-    if (root.nodeType === 3) { const v = tr(root.nodeValue); if (v !== root.nodeValue) root.nodeValue = v; return; }
+    if (root.nodeType === 3) { if (root.parentElement && root.parentElement.closest('[translate="no"]')) return; const v = tr(root.nodeValue); if (v !== root.nodeValue) root.nodeValue = v; return; }
     if (root.nodeType !== 1 || /^(SCRIPT|STYLE|TEXTAREA|CODE|PRE)$/.test(root.tagName)) {
       if (root.nodeType === 1 && root.tagName === "TEXTAREA") attrs(root);
       return;
@@ -883,10 +891,12 @@
       if (n.nodeType === 1) { attrs(n); continue; }
       const p = n.parentElement;
       if (p && /^(SCRIPT|STYLE|TEXTAREA|CODE|PRE)$/.test(p.tagName)) continue;
+      if (p && p.closest && p.closest('[translate="no"]')) continue;     // z. B. Prompts der Nutzer
       const v = tr(n.nodeValue); if (v !== n.nodeValue) n.nodeValue = v;
     }
   }
   function attrs(el) {
+    if (el.closest && el.closest('[translate="no"]')) return;
     for (const a of ["placeholder", "title"]) {
       const v = el.getAttribute && el.getAttribute(a);
       if (v) { const t = tr(v); if (t !== v) el.setAttribute(a, t); }

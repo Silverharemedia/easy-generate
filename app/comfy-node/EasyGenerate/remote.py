@@ -356,6 +356,23 @@ async def comfy_fetch(request):
     """Ergebnisse von der Cloud-GPU auf den PC holen und in die Galerie einsortieren."""
     from . import gallery
     data = await request.json()
+    job = str(data.get("job") or "")
+    if job:
+        async with gallery.job_lock("gpu:" + job):
+            done = gallery.job_get("gpu:" + job)
+            if done:
+                return web.json_response({"files": done})
+            resp = await _comfy_fetch(request, data)
+            try:
+                gallery.job_put("gpu:" + job, json.loads(resp.body).get("files") or [])
+            except Exception:
+                pass
+            return resp
+    return await _comfy_fetch(request, data)
+
+
+async def _comfy_fetch(request, data):
+    from . import gallery
     slot = req_slot(request, data)
     act(slot)["last"] = time.time()
     host = await target(slot)

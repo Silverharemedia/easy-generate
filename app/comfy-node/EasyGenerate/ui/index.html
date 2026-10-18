@@ -426,7 +426,7 @@ const host = window.easyApp || null;          // vorhanden, wenn im Easy-Generat
 const cid = (() => { let c = null; try{ c = sessionStorage.getItem("eg_cid"); }catch(e){} if(!c){ c = crypto.randomUUID ? crypto.randomUUID() : "eg" + Math.random().toString(36).slice(2); try{ sessionStorage.setItem("eg_cid", c); }catch(e){} } return c; })();
 const store = {
   get(k, d){ try{ const v = localStorage.getItem("eg_" + k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },
-  set(k, v){ try{ localStorage.setItem("eg_" + k, JSON.stringify(v)); }catch(e){} }
+  set(k, v){ try{ localStorage.setItem("eg_" + k, JSON.stringify(v)); return true; }catch(e){ return false; } }
 };
 const GBf = b => (b / 1073741824).toFixed(b > 10 * 1073741824 ? 0 : 1) + " GB";
 const api = async (url, body) => {
@@ -736,7 +736,7 @@ async function uploadImage(img, B){
   img.up = img.up || {};
   if(img.up[B]) return img.up[B];
   const fd = new FormData();
-  fd.append("image", img.file, img.file.name || "bild.png"); fd.append("overwrite", "true");
+  fd.append("image", img.file, img.file.name || "bild.png"); fd.append("overwrite", "false");   // gleicher Name, anderes Bild -> eigener Name (wartende Aufträge behalten ihr Bild)
   const r = await fetch(B + "/upload/image", { method: "POST", body: fd });
   if(!r.ok) throw new Error("Bild-Upload fehlgeschlagen (" + r.status + ")");
   const j = await r.json();
@@ -745,9 +745,17 @@ async function uploadImage(img, B){
 
 /* ================= Verbindung ================= */
 let online = false, ws = null;
+let statusBusy = false, statusFails = 0;
 async function checkStatus(){
+  if(statusBusy) return;
+  statusBusy = true;
+  try{ await checkStatus2(); } finally { statusBusy = false; }
+}
+async function checkStatus2(){
   try{
-    const j = await (await fetch("/system_stats", { cache: "no-store" })).json();
+    const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 8000);
+    const j = await (await fetch("/system_stats", { cache: "no-store", signal: ctl.signal })).json();
+    clearTimeout(to); statusFails = 0;
     const d = (j.devices || [])[0];
     online = true; $("#dot").classList.add("on"); offlineSince = null;
     if(crashLive === "noresp"){ crashLive = null; $("#crashBox").classList.add("hidden"); }
@@ -757,8 +765,8 @@ async function checkStatus(){
     $("#statusTxt").title = d ? String(d.name || "") : "";
   }catch(e){
     online = false; $("#dot").classList.remove("on"); $("#statusTxt").textContent = "ComfyUI nicht erreichbar";
-    offlineSince = offlineSince || Date.now();
-    if(!crashLive && Date.now() - offlineSince > 10000){ crashLive = "noresp"; showCrash("noresp", {}); }
+    offlineSince = offlineSince || Date.now(); statusFails++;
+    if(!crashLive && statusFails >= 3 && Date.now() - offlineSince > 10000){ crashLive = "noresp"; showCrash("noresp", {}); }
   }
   if(state.tab === "video" || state.tab === "image") updateGo();
 }
@@ -835,12 +843,17 @@ async function generate(){
   // alles sofort festhalten – während die GPU startet, darf man schon das nächste Video vorbereiten
   const promptText = $("#prompt").value.trim(), units = workUnits(), est = estimate();
   const wf = buildPrompt({}, seed), imgs = info.images.map(im => [im, state.images[im.id]]);
-  const thumb = await makeThumb((imgs.find(([im, img]) => img && !img.audio) || [])[1]);
-  state.submitting[B] = (state.submitting[B] || 0) + 1; clearTimeout(autoPauseT[B]);
+  state.submitting[B] = (state.submitting[B] || 0) + 1; clearTimeout(autoPauseT[B]); autoPauseArmed.delete(B);
   try{
     if(B && !(await gpuPrepare(key, B))) return;
+    const thumb = await makeThumb((imgs.find(([im, img]) => img && !img.audio) || [])[1]);
     const inputs = [];
-    for(const [im, img] of imgs){ const name = await uploadImage(img, B); wf[im.id].inputs[im.key] = name; inputs.push({ id: im.id, name }); }
+    for(const [im, img] of imgs){
+      const name = await uploadImage(img, B); wf[im.id].inputs[im.key] = name;
+      let local = B ? null : name;
+      if(B){ try{ local = await uploadImage(img, ""); }catch(e){} }   // Kopie auf dem PC – fürs spätere „Übernehmen“
+      inputs.push({ id: im.id, name: local, remote: B ? name : null });
+    }
     let rpSeq = null;
     if(B){ try{ rpSeq = (await api(B + "/easy/progress?since=999999999")).seq || 0; }catch(e){} }
     const r = await fetch(B + "/prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: wf, client_id: cid }) });
@@ -930,10 +943,12 @@ function endRun(run){
   saveJobs(); renderQueue(); paint(); updateGo();
 }
 function slimWf(wf){ const o = {}; for(const [id, n] of Object.entries(wf || {})) o[id] = { class_type: n.class_type, _meta: n._meta }; return o; }
+state.fetchJobs = [];
 function saveJobs(){
-  const pick = j => ({ id: j.id, key: j.key, kind: j.kind, B: j.B, sub: j.sub, start: j.start, total: j.total, wf: j.wf, units: j.units, est: j.est, prompt: j.prompt, title: j.title, thumb: j.thumb, inputs: j.inputs });
-  const all = [...state.runs, ...state.queue, ...(state.restoring || []).filter(j => ![...state.runs, ...state.queue].some(x => x.id === j.id))];
-  store.set("jobs", all.map(pick));
+  const pick = j => ({ id: j.id, key: j.key, kind: j.kind, B: j.B, sub: j.sub, start: j.start, total: j.total, wf: j.wf, units: j.units, est: j.est, prompt: j.prompt, title: j.title, thumb: j.thumb, inputs: j.inputs, fetch: !!j.fetch });
+  const cur = [...state.runs, ...state.queue, ...state.fetchJobs];
+  const all = cur.concat((state.restoring || []).filter(j => !cur.some(x => x.id === j.id)));
+  if(!store.set("jobs", all.map(pick))) store.set("jobs", all.map(j => Object.assign(pick(j), { thumb: null })));   // Speicher voll: ohne Vorschaubilder
 }
 // Jede GPU bekommt ihre eigene Farbe (dein PC grau)
 const LANE_COLORS = ["#4ea1ff", "#b07cff", "#3ecf8e", "#ffb020", "#ff6b9a", "#2dd4bf", "#f97316", "#a3e635"];
@@ -954,7 +969,10 @@ async function makeThumb(img){
   }catch(e){ return null; }
 }
 state.done = store.get("jobsDone", []);
-function saveDone(){ state.done = state.done.slice(0, 8); store.set("jobsDone", state.done); }
+function saveDone(){
+  state.done = state.done.slice(0, 8);
+  if(!store.set("jobsDone", state.done)) store.set("jobsDone", state.done.map(j => Object.assign({}, j, { thumb: null })));   // Speicher voll: ohne Vorschaubilder
+}
 function renderQueue(){
   const el = $("#queueBox"), card = $("#queueCard"); if(!el || !card) return;
   const all = [...state.runs, ...state.queue];
@@ -964,11 +982,11 @@ function renderQueue(){
   card.classList.toggle("hidden", !show);
   $("#studioGrid").classList.toggle("withq", !!show);
   document.querySelector("main .wrap").classList.toggle("wide", !!show && (state.tab === "video" || state.tab === "image"));
-  if(!show){ el.innerHTML = ""; return; }
+  if(!show){ el.innerHTML = ""; renderQueue.last = ""; return; }
   const btn = (act, id, icon, title, cls) => `<button class="qbtn ${cls || ""}" type="button" data-a="${act}" data-q="${esc(id)}" title="${esc(T(title))}">${icon}</button>`;
   const thumb = j => `<div class="qthumb" ${j.thumb ? `style="background-image:url('${j.thumb}')"` : ""}>${j.thumb ? "" : (j.kind === "image" ? "🖼️" : "🎬")}</div>`;
   const tools = j => btn("copy", j.id, "📋", "Prompt kopieren") + (j.inputs && j.inputs.length || j.prompt ? btn("use", j.id, "↩", "Bild und Prompt übernehmen") : "");
-  const item = (j, status, extra, cls, sid) => `<div class="qitem ${cls}" style="--lc:${laneColor(j.B)}" data-id="${esc(j.id)}" title="${esc(j.prompt || "")}">${thumb(j)}<div class="qbody"><div class="qtitle">${esc(j.title || j.key)}</div><div class="qprompt">${esc(j.prompt || "–")}</div><div class="qfoot"><span class="qs" ${sid ? `id="${sid}"` : ""}>${esc(status)}</span>${tools(j)}${extra}</div></div></div>`;
+  const item = (j, status, extra, cls, sid) => `<div class="qitem ${cls}" style="--lc:${laneColor(j.B)}" data-id="${esc(j.id)}">${thumb(j)}<div class="qbody"><div class="qtitle" translate="no">${esc(j.title || j.key)}</div><div class="qprompt" translate="no" title="${esc(j.prompt || "")}">${esc(j.prompt || "–")}</div><div class="qfoot"><span class="qs" ${sid ? `id="${sid}"` : ""}>${esc(status)}</span>${tools(j)}${extra}</div></div></div>`;
   let html = `<h4>📋 <span>${esc(T("Warteschlange"))}</span> <span class="hint">(${all.length})</span><span class="sp"></span></h4>`;
   if(!all.length && !preps.length) html += `<div class="hint" style="margin-bottom:8px">${esc(T("Gerade läuft nichts."))}</div>`;
   for(const B of lanes){
@@ -978,13 +996,15 @@ function renderQueue(){
     if(p) html += `<div class="qitem" style="--lc:${laneColor(B)}"><div class="qthumb">⏳</div><div class="qbody"><div class="qtitle" id="qp-${slugB(B)}">${esc(T(p.txt || "Bereite vor …"))}</div></div></div>`;
     html += items.map((j, i) => {
       const running = state.runs.includes(j);
-      return item(j, running ? T(j.txt || "läuft") : `${i + 1}. ${T("wartet")}`, btn("x", j.id, "✕", running ? "Abbrechen" : "Aus der Warteschlange entfernen", "x"), running ? "run" : "", running ? "qs-" + j.id : "");
+      return item(j, running ? T("läuft") : `${i + 1}. ${T("wartet")}`, btn("x", j.id, "✕", running ? "Abbrechen" : "Aus der Warteschlange entfernen", "x"), running ? "run" : "", running ? "qs-" + j.id : "");
     }).join("");
   }
   if(state.done.length){
     html += `<div class="qlane" style="margin-top:16px">✅ ${esc(T("Zuletzt fertig"))}<span style="flex:1"></span><button class="qbtn" type="button" data-a="clear" data-q="-" title="${esc(T("Liste leeren"))}">🗑</button></div>`;
     html += state.done.map(j => item(j, (j.B ? "🚀 GPU " + slotOfB(j.B) : "🖥️ " + T("Mein PC")) + (j.secs ? " · " + fmtTime(j.secs) + " " + T("Min.") : ""), "", "done", "")).join("");
   }
+  if(html === renderQueue.last){ paint(); return; }    // unverändert – nichts neu aufbauen
+  renderQueue.last = html;
   el.innerHTML = html;
   el.querySelectorAll("[data-a]").forEach(b => b.onclick = ev => { ev.stopPropagation(); queueAction(b.dataset.a, b.dataset.q); });
   el.querySelectorAll(".qitem.done").forEach(d => d.onclick = () => { const j = state.done.find(x => x.id === d.dataset.id); if(j && j.files && j.files.length){ showResult(j.files); showMsg("ok", j.prompt ? "✅ " + j.prompt.slice(0, 80) : "✅"); } });
@@ -1009,9 +1029,10 @@ async function reuseJob(j){
   if(j.prompt != null){ $("#prompt").value = j.prompt; $("#prompt").dispatchEvent(new Event("input")); }
   let got = 0;
   for(const inp of j.inputs || []){
+    if(!inp.name) continue;      // (ältere Cloud-GPU-Aufträge ohne Kopie auf dem PC: die GPU nicht extra wecken)
     try{
       const parts = String(inp.name).split("/"), fn = parts.pop(), sub = parts.join("/");
-      const r = await fetch(`${j.B || ""}/view?filename=${encodeURIComponent(fn)}&subfolder=${encodeURIComponent(sub)}&type=input`);
+      const r = await fetch(`/view?filename=${encodeURIComponent(fn)}&subfolder=${encodeURIComponent(sub)}&type=input`);
       if(!r.ok) continue;
       const blob = await r.blob();
       setImage(inp.id, new File([blob], fn, { type: blob.type || "image/png" })); got++;
@@ -1042,26 +1063,30 @@ async function restoreJobs(){
   if(!Array.isArray(saved) || !saved.length) return;
   state.restoring = saved.slice();      // solange geprüft wird, bleiben sie gespeichert
   if(!gpu.list && saved.some(j => j.B)) await loadGpuInfo();
-  const keep = [];
+  const doneIds = new Set(state.done.map(d => d.id));
+  const lanes = [...new Set(saved.map(j => j.B || ""))];
+  // je Rechner einmal die Warteschlange abfragen (parallel)
+  const queues = {};
+  await Promise.all(lanes.map(async B => { try{ queues[B] = await api(B + "/queue"); }catch(e){ queues[B] = null; } }));
+  const keep = [], refetch = [];
   for(const j of saved){
-    if(j.B && gpu.list && !gpuEntry(j.B)){ state.restoring = state.restoring.filter(x => x !== j); continue; }   // diese GPU gibt es nicht mehr
-    try{
-      const q = await api((j.B || "") + "/queue");
-      const has = arr => (arr || []).some(e => e && e[1] === j.id);
-      if(q && !q.error && (has(q.queue_running) || has(q.queue_pending))){ keep.push(j); continue; }
-      const h = await api((j.B || "") + "/history/" + j.id);
-      if(h && h[j.id]) keep.push(j);          // schon fertig – Ergebnis wird gleich abgeholt
-      else if(!q || q.error) keep.push(j);    // Server gerade nicht erreichbar – nicht verwerfen
-    }catch(e){ keep.push(j); }
+    const B = j.B || "";
+    if(doneIds.has(j.id)) continue;                                                     // schon fertig einsortiert
+    if(B && gpu.list && !gpuEntry(B)) continue;                                         // diese GPU gibt es nicht mehr
+    const q = queues[B], has = arr => (arr || []).some(e => e && e[1] === j.id);
+    if(q && !q.error && (has(q.queue_running) || has(q.queue_pending))){ keep.push(j); continue; }
+    if(!q || q.error){ keep.push(j); continue; }                                        // Server gerade nicht erreichbar – nicht verwerfen
+    try{ const h = await api(B + "/history/" + j.id); if(h && h[j.id]) (j.fetch ? refetch : keep).push(j); }catch(e){ keep.push(j); }
   }
   state.restoring = null;
-  if(!keep.length){ saveJobs(); return; }
   for(const j of keep){
     if([...state.runs, ...state.queue].some(x => x.id === j.id)) continue;
+    j.fetch = false;
     if(state.runs.some(r => r.B === j.B)) state.queue.push(j);
     else startJob(Object.assign(j, { rpSeq: null }), true);
   }
   saveJobs(); renderQueue(); updateGo();
+  for(const j of refetch) finish(Object.assign(j, { finished: false, done: new Set() }));   // Ergebnis war fertig, aber noch nicht abgeholt
 }
 // Alle Aufträge einer GPU beenden (pausiert, gelöscht, neu gestartet) – laufende und wartende
 function dropLane(B, text, keepQueued){
@@ -1116,8 +1141,10 @@ async function finish(run){
     if(!files.length) await new Promise(r => setTimeout(r, 800));
   }
   const secs = (Date.now() - run.start) / 1000;
-  recordRun((run.B ? "gpu:" : "") + run.key, run.units, secs);
+  if(!run.fetch) recordRun((run.B ? "gpu:" : "") + run.key, run.units, secs);
   state.fetching = state.fetching || {}; if(run.B) state.fetching[run.B] = (state.fetching[run.B] || 0) + 1;
+  // bis das Ergebnis in der Galerie ist, bleibt der Auftrag gespeichert (übersteht ein Neuladen mittendrin)
+  run.fetch = true; if(!state.fetchJobs.includes(run)) state.fetchJobs.push(run);
   endRun(run);
   if(state.tab === "video" || state.tab === "image") renderEta();
   const pre = lanePrefix(run);
@@ -1127,16 +1154,17 @@ async function finish(run){
     if(run.B){
       if(!state.runs.length) showMsg("ok", pre + T("Fertig – hole das Ergebnis von der Cloud-GPU …"));
       const slot = (gpuEntry(run.B) || {}).slot || slotOfB(run.B);
-      const fr = await api("/easy/cloud/comfy/fetch", { files, slot, model: tool ? tool.title : run.key, kind: run.kind, prompt: run.prompt ?? "" });
+      const fr = await api("/easy/cloud/comfy/fetch", { files, slot, job: run.id, model: tool ? tool.title : run.key, kind: run.kind, prompt: run.prompt ?? "" });
       if(!fr.files || !fr.files.length){ showMsg("err", pre + T("Das Ergebnis konnte nicht von der Cloud-GPU geholt werden.")); return; }
       files = fr.files;
       setTimeout(() => refreshGpuMoney(true), 5000);   // Guthaben nach dem Erstellen auffrischen
-    } else files = await toGallery(files, tool ? tool.title : run.key, run.kind, run.prompt ?? "");
+    } else files = await toGallery(files, tool ? tool.title : run.key, run.kind, run.prompt ?? "", run.id);
     showResult(files);
     showMsg("ok", pre + T(`Fertig in ${fmtTime(secs)} Min.`) + (run.prompt ? " – " + run.prompt.slice(0, 60) : ""));
     state.done.unshift({ id: run.id, key: run.key, kind: run.kind, B: run.B, title: run.title, prompt: run.prompt, thumb: run.thumb, inputs: run.inputs, files, secs, at: Date.now() });
     saveDone(); renderQueue();
   } finally {
+    state.fetchJobs = state.fetchJobs.filter(j => j !== run); saveJobs();
     if(run.B){ state.fetching[run.B]--; maybeAutoPause(run.B); }
   }
 }
@@ -1175,8 +1203,8 @@ async function showInFolder(f){
   const r = await api("/easy/gallery/path", { r: f.r, p: f.p });
   if(r.path && host && host.showItem) host.showItem(r.path);
 }
-async function toGallery(files, model, kind, prompt){
-  try{ const r = await api("/easy/gallery/add", { files, model, kind, prompt }); if(r.files && r.files.length) return r.files; }catch(e){}
+async function toGallery(files, model, kind, prompt, job){
+  try{ const r = await api("/easy/gallery/add", { files, model, kind, prompt, job: job || "" }); if(r.files && r.files.length) return r.files; }catch(e){}
   return files;
 }
 $("#go").onclick = generate;
@@ -1251,16 +1279,17 @@ const gpuEntry = B => (gpu.list || []).find(x => x.B === B) || null;
 const slotOfB = B => +((B || "").replace("/easy/remote", "") || 1);
 const hwOf = e => ((cloud.hw || []).find(h => h.name === (e.current || e.hardware)) || {});
 // Welche GPU ist gewählt? Pro Modell gemerkt (z. B. GPU 1 für Bild→Video, GPU 2 für Text→Video)
+let gpuSlotMap = null;
 function gpuSel(){
   const list = gpu.list || []; if(!list.length) return null;
-  const m = store.get("gpuSlot", {});
+  const m = gpuSlotMap || (gpuSlotMap = store.get("gpuSlot", {}));
   const want = m[state.active[state.kind]] || m._last || 1;
   return list.find(x => x.slot === want) || list[0];
 }
 function gpuB(){ const e = gpuSel(); return e ? e.B : null; }
 function pickGpu(slot){
   const m = store.get("gpuSlot", {});
-  m[state.active[state.kind]] = slot; m._last = slot; store.set("gpuSlot", m);
+  m[state.active[state.kind]] = slot; m._last = slot; store.set("gpuSlot", m); gpuSlotMap = m;
   gpu.info = gpuSel(); gpu.adding = false;
   renderStudio();
 }
@@ -1352,7 +1381,7 @@ function renderGpuBar(){
   bindGpuMoney();
   if($("#gpuPause")) $("#gpuPause").onclick = () => rentedAction(i.id, "pause");
   if($("#gpuStart")) $("#gpuStart").onclick = () => rentedAction(i.id, "start");
-  $("#gpuAuto").onchange = e => { setPauseAfter(e.target.checked); if(!e.target.checked){ autoPauseArmed.forEach(b => clearTimeout(autoPauseT[b])); autoPauseArmed.clear(); } };   // greift, wenn der letzte Auftrag einer GPU fertig ist
+  $("#gpuAuto").onchange = e => { setPauseAfter(e.target.checked); if(e.target.checked) (gpu.list || []).forEach(g => maybeAutoPause(g.B)); else { autoPauseArmed.forEach(b => clearTimeout(autoPauseT[b])); autoPauseArmed.clear(); } };   // greift, wenn der letzte Auftrag einer GPU fertig ist
   $("#gpuRef").onclick = async () => { gpu.list = null; renderGpuBar(); refreshGpuMoney(true); };
   if($("#gpuUpd")) $("#gpuUpd").onclick = async () => { $("#gpuUpd").disabled = true; const r = await api("/easy/cloud/comfy/update", { slot: i.slot }); if(r.error) toast("❌ " + esc(r.error), "err"); else toast("✅ " + esc(T("Wird aktualisiert – die Cloud-GPU richtet sich in einigen Minuten neu ein.")), "ok"); gpu.list = null; renderGpuBar(); };
 }
@@ -1888,7 +1917,7 @@ async function drawRented(){
     if(pw) pw.onchange = () => api("/easy/cloud/rented/pause_when_ready", { space: x.id, value: pw.checked });
     d.querySelectorAll("[data-a]").forEach(b => b.onclick = async () => {
       const act = b.dataset.a;
-      if(act === "use" && x.kind === "comfy"){ state.compute[state.kind === "image" ? "image" : "video"] = "gpu"; store.set("compute", state.compute); { const m = store.get("gpuSlot", {}); m._last = x.slot || 1; m[state.active[state.kind]] = x.slot || 1; store.set("gpuSlot", m); } gpu.list = null; showTab(state.kind === "image" ? "image" : "video"); return; }
+      if(act === "use" && x.kind === "comfy"){ state.compute[state.kind === "image" ? "image" : "video"] = "gpu"; store.set("compute", state.compute); { const m = store.get("gpuSlot", {}); m._last = x.slot || 1; m[state.active[state.kind]] = x.slot || 1; store.set("gpuSlot", m); gpuSlotMap = null; } gpu.list = null; showTab(state.kind === "image" ? "image" : "video"); return; }
       if(act === "use"){ const k = /image|flux|qwen-image|z-image|sdxl|klein/i.test(x.from || x.id) ? "image" : "video"; useCloud(k, { mode: "space", id: x.id, title: x.id.split("/").pop(), rented: true, per_hour: x.per_hour }); return; }
       if(act === "delete" && !confirm(T(`„${x.id}“ endgültig löschen?`) + "\n\n" + T("Er kostet danach nichts mehr; zum erneuten Nutzen musst du ihn neu mieten."))) return;
       let body = { space: x.id };

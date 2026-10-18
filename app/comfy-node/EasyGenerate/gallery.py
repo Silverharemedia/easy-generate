@@ -122,6 +122,36 @@ def file_ref(path):
     return None
 
 
+# Schon einsortierte Auftraege merken: wird ein Ergebnis zweimal angefragt (z. B. Neuladen waehrend des Abholens),
+# gibt es dieselben Dateien zurueck statt eines Duplikats.
+JOBS_FILE = os.path.join(DATA, "placed_jobs.json")
+_JOB_LOCKS = {}
+
+
+def job_lock(job):
+    return _JOB_LOCKS.setdefault(job, asyncio.Lock())
+
+
+def job_get(job):
+    if not job:
+        return None
+    refs = (read_json(JOBS_FILE, {}) or {}).get(job)
+    if refs and all(path_from(r.get("r"), r.get("p")) for r in refs):
+        return refs
+    return None
+
+
+def job_put(job, refs):
+    if not job or not refs:
+        return
+    with LOCK:
+        d = read_json(JOBS_FILE, {}) or {}
+        d[job] = refs
+        if len(d) > 300:
+            d = dict(list(d.items())[-300:])
+        write_json(JOBS_FILE, d)
+
+
 def place(path, model, kind, prompt="", source="local"):
     """Neues Ergebnis einsortieren (verschieben je nach Einstellung) und im Index vermerken."""
     with LOCK:
@@ -331,16 +361,22 @@ async def gallery_file(request):
 async def gallery_add(request):
     """Nach einer Erstellung: Dateien einsortieren. Antwort enthaelt die neuen Adressen."""
     data = await request.json()
-    out = []
-    for f in data.get("files") or []:
-        p = resolve_output(f) if isinstance(f, dict) else None
-        if not p:
-            continue
-        t = await asyncio.to_thread(place, p, str(data.get("model") or ""), str(data.get("kind") or ""), str(data.get("prompt") or ""),
-                                    "cloud" if data.get("cloud") else "local")
-        ref = file_ref(t)
-        if ref:
-            out.append(dict(ref, name=os.path.basename(t)))
+    job = str(data.get("job") or "")
+    async with job_lock(job or id(data)):
+        done = job_get(job)
+        if done:
+            return web.json_response({"files": done})
+        out = []
+        for f in data.get("files") or []:
+            p = resolve_output(f) if isinstance(f, dict) else None
+            if not p:
+                continue
+            t = await asyncio.to_thread(place, p, str(data.get("model") or ""), str(data.get("kind") or ""), str(data.get("prompt") or ""),
+                                        "cloud" if data.get("cloud") else "local")
+            ref = file_ref(t)
+            if ref:
+                out.append(dict(ref, name=os.path.basename(t)))
+        job_put(job, out)
     return web.json_response({"files": out})
 
 
