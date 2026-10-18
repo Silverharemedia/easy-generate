@@ -15,7 +15,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.5.2"
+VERSION = "1.6.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -70,6 +70,8 @@ DEFAULT_CFG = {"provider": "ollama", "claude_key": "", "claude_model": "claude-h
 def load_cfg():
     cfg = json.loads(json.dumps(DEFAULT_CFG))
     cfg.update(read_json(CFG_FILE, {}))
+    if not cfg.get("hf_token") and os.environ.get("EG_CLOUD") and os.environ.get("HF_TOKEN"):
+        cfg["hf_token"] = os.environ["HF_TOKEN"]      # Cloud-GPU: Schluessel als Space-Secret
     return cfg
 
 
@@ -285,7 +287,7 @@ async def easy_set_workflow(request):
     write_json(os.path.join(WF_DIR, name + ".json"), wf)
     reg = registry()
     entry = reg.get(name, {})
-    entry.update({k: meta[k] for k in ("title", "kind", "custom", "thumb", "description") if k in meta})
+    entry.update({k: meta[k] for k in ("title", "kind", "custom", "thumb", "description", "cloud_only") if k in meta})
     entry.setdefault("enabled", True)
     entry["added"] = entry.get("added") or time.strftime("%Y-%m-%d")
     reg[name] = entry
@@ -454,7 +456,8 @@ async def _download_one(session, m):
     have = os.path.getsize(part) if os.path.exists(part) else 0
     headers = {"Range": f"bytes={have}-"} if have else {}
     token = load_cfg().get("hf_token")
-    if token and "huggingface.co" in m["url"]:
+    from urllib.parse import urlparse as _up
+    if token and (_up(m["url"]).hostname or "").lower() == "huggingface.co":
         headers["Authorization"] = "Bearer " + token
     async with session.get(m["url"], headers=headers) as r:
         if r.status in (401, 403):
@@ -1122,6 +1125,7 @@ except Exception as _e:
     print("[Easy Generate] Galerie-Modul nicht geladen:", _e)
 try:
     from . import cloud  # noqa: F401  (registriert die Cloud-Routen)
+    from . import remote  # noqa: F401  (eigene Cloud-GPU mit ComfyUI)
 except Exception as _e:
     print("[Easy Generate] Cloud-Modul nicht geladen:", _e)
 

@@ -1,0 +1,322 @@
+"""Easy Generate - eigene Cloud-GPU mit ComfyUI.
+
+Legt im HuggingFace-Konto einen privaten Docker-Space an, auf dem ComfyUI + diese Erweiterung laufen,
+und reicht Anfragen der Oberflaeche dorthin durch (/easy/remote/...). So laufen die eigenen Vorlagen
+genau wie zu Hause - nur auf einer gemieteten Grafikkarte.
+
+Sicherheit: Der Space ist privat. Zugriff erfolgt mit dem Space-Schluessel (nur Lesen).
+Der Haupt-Schluessel liegt als Space-Secret im eigenen Space (fuer gesperrte Modelle);
+dort laeuft nur ComfyUI und Easy Generate - kein fremder Code.
+"""
+import asyncio
+import base64
+import json
+import os
+import time
+from urllib.parse import quote, urlparse
+
+import aiohttp
+from aiohttp import web
+
+from . import DATA, HERE, VERSION, routes
+from .cloud import (HF, CACHE, HFError, _rented_entry, cstate, ensure_watch, hf, json_body_required, save_cstate,
+                    space_token, token)
+
+SPACE_NAME = "eg-comfyui"
+
+DOCKERFILE = """FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg libgl1 libglib2.0-0 \\
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user PATH=/home/user/.local/bin:$PATH PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1 EG_CLOUD=1
+WORKDIR /home/user
+RUN pip install --user torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git \\
+    && pip install --user -r ComfyUI/requirements.txt && pip install --user psutil
+COPY --chown=user EasyGenerate /home/user/ComfyUI/custom_nodes/EasyGenerate
+EXPOSE 7860
+CMD ["python", "ComfyUI/main.py", "--listen", "0.0.0.0", "--port", "7860", "--disable-auto-launch"]
+"""
+
+README = """---
+title: Easy Generate ComfyUI
+emoji: 🎬
+colorFrom: red
+colorTo: yellow
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
+Private Cloud-GPU fuer [Easy Generate](https://github.com/Silverharemedia/easy-generate):
+ComfyUI mit der Easy-Generate-Erweiterung. Wird von Easy Generate verwaltet.
+"""
+
+
+def comfy_entry():
+    for x in cstate().get("rented", []):
+        if x.get("kind") == "comfy":
+            return x
+    return None
+
+
+def node_files():
+    """Dateien der Erweiterung fuer den Space (ohne Nutzerdaten)."""
+    out = []
+    for root, dirs, files in os.walk(HERE):
+        dirs[:] = [d for d in dirs if d not in ("data", "__pycache__")]
+        for f in files:
+            if f.endswith((".pyc",)) or f == "cloud_worker.py":
+                continue
+            p = os.path.join(root, f)
+            rel = os.path.relpath(p, HERE).replace(os.sep, "/")
+            out.append(("EasyGenerate/" + rel, p))
+    return out
+
+
+async def commit_files(repo_id, files, message):
+    """Dateien per Commit-API hochladen (kleine Textdateien, base64)."""
+    lines = [json.dumps({"key": "header", "value": {"summary": message, "description": ""}})]
+    for path, content in files:
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        lines.append(json.dumps({"key": "file", "value": {"content": base64.b64encode(content).decode(), "path": path, "encoding": "base64"}}))
+    body = ("\n".join(lines) + "\n").encode()
+    headers = {"Authorization": "Bearer " + token(), "Content-Type": "application/x-ndjson", "User-Agent": "EasyGenerate"}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as s:
+        async with s.post(f"{HF}/api/spaces/{repo_id}/commit/main", data=body, headers=headers) as r:
+            text = await r.text()
+            if r.status >= 400:
+                raise HFError(r.status, text)
+
+
+def program_files():
+    files = [("Dockerfile", DOCKERFILE), ("README.md", README)]
+    for path, p in node_files():
+        with open(p, "rb") as fh:
+            files.append((path, fh.read()))
+    return files
+
+
+@routes.post("/easy/cloud/comfy/create")
+async def comfy_create(request):
+    if not json_body_required(request):
+        return web.json_response({"error": "bad request"}, status=400)
+    data = await request.json()
+    hw = str(data.get("hardware") or "rtx-pro-6000")
+    sleep = int(data.get("sleep") or 900)
+    if not token():
+        return web.json_response({"error": "AUTH"}, status=400)
+    try:
+        me = await hf("GET", "/api/whoami-v2")
+        user = me["name"]
+        sid = f"{user}/{SPACE_NAME}"
+        payload = {"name": SPACE_NAME, "type": "space", "sdk": "docker", "private": True,
+                   "hardware": hw, "sleepTimeSeconds": sleep,
+                   "secrets": [{"key": "HF_TOKEN", "value": token()}]}
+        try:
+            await hf("POST", "/api/repos/create", body=payload, timeout=60)
+        except HFError as e:
+            if e.status != 409:
+                raise
+        await commit_files(sid, program_files(), f"Easy Generate {VERSION}")
+        try:
+            await hf("POST", f"/api/spaces/{sid}/secrets", body={"key": "HF_TOKEN", "value": token()})
+        except Exception:
+            pass
+        try:
+            await hf("POST", f"/api/spaces/{sid}/hardware", body={"flavor": hw, "sleepTimeSeconds": sleep})
+        except HFError as e:
+            if e.status == 402 or "payment" in e.text.lower() or "credit" in e.text.lower():
+                return web.json_response({"error": "PAYMENT|" + e.text[:300]}, status=400)
+            raise
+        st = cstate()
+        st["rented"] = [x for x in st.get("rented", []) if x["id"] != sid]
+        st["rented"].append({"id": sid, "from": "ComfyUI (Easy Generate)", "kind": "comfy", "hardware": hw, "sleep": sleep,
+                             "created": time.time(), "version": VERSION, "pause_when_ready": bool(data.get("pause_when_ready"))})
+        save_cstate(st)
+        if data.get("pause_when_ready"):
+            ensure_watch(sid)
+        return web.json_response({"id": sid})
+    except HFError as e:
+        msg = e.text
+        try:
+            msg = json.loads(e.text).get("error", msg)
+        except Exception:
+            pass
+        code = "AUTH" if e.status in (401, 403) else ""
+        return web.json_response({"error": (code + "|" if code else "") + str(msg)[:400]}, status=400)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
+@routes.post("/easy/cloud/comfy/update")
+async def comfy_update(request):
+    """Programm auf der Cloud-GPU auf den Stand dieser Easy-Generate-Version bringen."""
+    x = comfy_entry()
+    if not x:
+        return web.json_response({"error": "Keine Cloud-GPU eingerichtet."}, status=400)
+    try:
+        await commit_files(x["id"], program_files(), f"Easy Generate {VERSION}")
+        st = cstate()
+        e = _rented_entry(st, x["id"])
+        if e:
+            e["version"] = VERSION
+            save_cstate(st)
+        return web.json_response({"ok": True})
+    except HFError as e:
+        return web.json_response({"error": str(e)}, status=400)
+
+
+@routes.get("/easy/cloud/comfy/info")
+async def comfy_info(request):
+    x = comfy_entry()
+    if not x:
+        return web.json_response({"exists": False, "space_token": bool(space_token()), "version": VERSION})
+    out = {"exists": True, "id": x["id"], "hardware": x.get("hardware"), "remote_version": x.get("version"),
+           "version": VERSION, "space_token": bool(space_token())}
+    try:
+        rt = await hf("GET", f"/api/spaces/{x['id']}/runtime")
+        out["stage"] = rt.get("stage")
+        out["current"] = (rt.get("hardware") or {}).get("current")
+    except HFError as e:
+        out["stage"] = "GONE" if e.status == 404 else "ERROR"
+    except Exception:
+        out["stage"] = "UNKNOWN"
+    return web.json_response(out)
+
+
+# ------------------------------------------------------------------ Durchreichen an die Cloud-GPU
+async def target():
+    x = comfy_entry()
+    if not x:
+        raise web.HTTPNotFound(text="Keine Cloud-GPU eingerichtet.")
+    host = x.get("host")
+    if not host:
+        info = await hf("GET", f"/api/spaces/{x['id']}")
+        host = info.get("host") or (f"https://{info['subdomain']}.hf.space" if info.get("subdomain") else "")
+        if not host:
+            raise web.HTTPServiceUnavailable(text="Adresse der Cloud-GPU unbekannt.")
+        st = cstate()
+        e = _rented_entry(st, x["id"])
+        if e:
+            e["host"] = host
+            save_cstate(st)
+    h = (urlparse(host).hostname or "").lower()
+    if not h.endswith(".hf.space"):
+        raise web.HTTPForbidden(text="Unerwartete Adresse.")
+    return host.rstrip("/")
+
+
+def auth_headers():
+    t = space_token()
+    if not t:
+        raise web.HTTPUnauthorized(text="AUTH")
+    return {"Authorization": "Bearer " + t, "X-HF-Authorization": "Bearer " + t}
+
+
+_SESSION = {}
+
+
+def session():
+    s = _SESSION.get("s")
+    if s is None or s.closed:
+        s = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=600))
+        _SESSION["s"] = s
+    return s
+
+
+@routes.get("/easy/remote/ws")
+async def remote_ws(request):
+    host = await target()
+    headers = auth_headers()
+    url = host.replace("https://", "wss://", 1) + "/ws?clientId=" + request.query.get("clientId", "eg")
+    local = web.WebSocketResponse(heartbeat=30)
+    await local.prepare(request)
+    try:
+        async with session().ws_connect(url, headers=headers, heartbeat=30) as rws:
+            async def up():
+                async for m in local:
+                    if m.type == aiohttp.WSMsgType.TEXT:
+                        await rws.send_str(m.data)
+            t = asyncio.ensure_future(up())
+            async for m in rws:
+                if m.type == aiohttp.WSMsgType.TEXT:
+                    await local.send_str(m.data)
+                elif m.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    break
+            t.cancel()
+    except Exception as e:
+        try:
+            await local.send_str(json.dumps({"type": "eg_remote_error", "data": {"error": str(e)[:300]}}))
+        except Exception:
+            pass
+    await local.close()
+    return local
+
+
+@routes.route("*", "/easy/remote/{tail:.*}")
+async def remote_proxy(request):
+    tail = request.match_info["tail"]
+    if tail == "ws":
+        return await remote_ws(request)
+    host = await target()
+    headers = auth_headers()
+    if request.headers.get("Content-Type"):
+        headers["Content-Type"] = request.headers["Content-Type"]
+    body = await request.read() if request.can_read_body else None
+    url = f"{host}/{tail}"
+    if request.query_string:
+        url += "?" + request.query_string
+    try:
+        r = await session().request(request.method, url, headers=headers, data=body, allow_redirects=False)
+    except Exception as e:
+        return web.json_response({"error": "REMOTE_DOWN|" + str(e)[:300]}, status=502)
+    try:
+        ctype = r.headers.get("Content-Type", "application/octet-stream")
+        if r.status in (401, 403, 404) and "text/html" in ctype:
+            await r.read()
+            return web.json_response({"error": "REMOTE_DOWN|HTTP %d" % r.status}, status=502)
+        resp = web.StreamResponse(status=r.status, headers={"Content-Type": ctype})
+        if r.headers.get("Content-Length"):
+            resp.content_length = int(r.headers["Content-Length"])
+        await resp.prepare(request)
+        async for chunk in r.content.iter_chunked(1024 * 1024):
+            await resp.write(chunk)
+        await resp.write_eof()
+        return resp
+    finally:
+        r.release()
+
+
+@routes.post("/easy/cloud/comfy/fetch")
+async def comfy_fetch(request):
+    """Ergebnisse von der Cloud-GPU auf den PC holen und in die Galerie einsortieren."""
+    from . import gallery
+    data = await request.json()
+    host = await target()
+    headers = auth_headers()
+    outdir = os.path.join(gallery.output_dir(), "easy-cloud-gpu")
+    os.makedirs(outdir, exist_ok=True)
+    refs = []
+    for f in data.get("files") or []:
+        name = os.path.basename(str(f.get("filename") or ""))
+        if not name:
+            continue
+        q = "filename=%s&subfolder=%s&type=%s" % tuple(quote(str(f.get(k) or d), safe="")
+                                                       for k, d in (("filename", ""), ("subfolder", ""), ("type", "output")))
+        dst = gallery.unique_path(outdir, name)
+        async with session().get(f"{host}/view?{q}", headers=headers) as r:
+            if r.status != 200:
+                continue
+            with open(dst + ".part", "wb") as fh:
+                async for chunk in r.content.iter_chunked(1024 * 1024):
+                    fh.write(chunk)
+        os.replace(dst + ".part", dst)
+        t = await asyncio.to_thread(gallery.place, dst, str(data.get("model") or ""), str(data.get("kind") or ""),
+                                    str(data.get("prompt") or ""), "cloud")
+        ref = gallery.file_ref(t)
+        if ref:
+            refs.append(dict(ref, name=os.path.basename(t)))
+    return web.json_response({"files": refs})
