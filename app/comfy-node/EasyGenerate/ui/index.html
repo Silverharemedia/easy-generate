@@ -951,6 +951,7 @@ function cloudErr(e){
     return "Dein kostenloses GPU-Tageskontingent bei HuggingFace ist aufgebraucht" + (m && m[1] ? ` (noch ${m[1]} s übrig, dieses Video bräuchte mehr)` : "") + ".\n→ Morgen gibt es neues Kontingent, mit HuggingFace PRO 8× mehr – oder nimm „💳 Pro Video bezahlen“ bzw. „🖥️ GPU mieten“.";
   }
   if(M[code]) return M[code] + (det ? "\n\n" + det.slice(0, 400) : "");
+  if(/timed out|timeout|Zeitueberschreitung|ConnectTimeout|ReadTimeout/i.test(s)) return "Der Space antwortet noch nicht – vermutlich startet er gerade noch. In ein, zwei Minuten „Erneut versuchen“.";
   return s.slice(0, 600);
 }
 function extLink(url, text, cls){ return `<a class="${cls || ""}" href="${esc(url)}" target="_blank" rel="noopener">${text}</a>`; }
@@ -1419,7 +1420,10 @@ async function renderSpaceForm(s){
   if(!info){
     $("#cSlots").innerHTML = `<div class="hint">Lese die Einstellungen des Space … (beim ersten Mal einige Sekunden)</div>`;
     ["#cPromptLbl", "#cPrompt", "#cAi", "#cDurBox", "#cEpBox"].forEach(x => $(x).classList.add("hidden"));
-    if(s.rented){ state.cfg = await api("/easy/config"); }
+    if(s.rented){
+      state.cfg = await api("/easy/config");
+      if(state.cfg.hf_space_token_set && !(await waitRented(s))) return;
+    }
     info = s.rented && !state.cfg.hf_space_token_set ? { error: "AUTH" } : await spaceInfo(s.id);
     if(curCloud() !== s || state.compute[k] !== "cloud") return;
     if(info.error && s.rented && /^(AUTH|FORBIDDEN)|401|403|Repository Not Found/.test(String(info.error))){ rentedTokenHelp(s); return; }
@@ -1470,6 +1474,30 @@ async function renderSpaceForm(s){
     else if(f.kind === "choice" && f.choices){ w.innerHTML = `<label class="l">${esc(f.label)}</label><select class="sel"></select>`; inp = w.querySelector("select"); inp.innerHTML = f.choices.map(c => `<option>${esc(c)}</option>`).join(""); if(cur != null) inp.value = String(cur); inp.onchange = () => { vals[f.i] = inp.value; saveVals(); }; }
     else { w.innerHTML = `<label class="l">${esc(f.label)}${f.min != null ? ` <span class="hint">(${f.min}–${f.max})</span>` : ""}</label><input type="${f.kind === "number" ? "number" : "text"}">`; inp = w.querySelector("input"); if(f.min != null){ inp.min = f.min; inp.max = f.max; } if(f.kind === "number") inp.step = f.int ? 1 : "any"; inp.value = cur ?? ""; inp.oninput = () => { vals[f.i] = inp.value === "" ? null : (f.kind === "number" ? +inp.value : inp.value); saveVals(); }; }
     box.appendChild(w);
+  }
+}
+// Gemietete GPU: erst warten, bis der Space fertig gebaut und gestartet ist (beim ersten Mal oft 5–20 Min.).
+async function waitRented(s){
+  const t0 = Date.now();
+  const show = (html, kind) => { $("#cSlots").innerHTML = `<div class="msg ${kind || "warn"}">${html}</div>`; ["#cPromptLbl", "#cPrompt", "#cAi", "#cDurBox", "#cEpBox"].forEach(x => $(x).classList.add("hidden")); };
+  const START = { BUILDING: "Die GPU wird eingerichtet (Programm wird gebaut) …", RUNNING_BUILDING: "Die GPU wird neu eingerichtet …", APP_STARTING: "Die GPU startet und lädt das Modell …", RUNNING_APP_STARTING: "Die GPU startet und lädt das Modell …" };
+  for(;;){
+    if(curCloud() !== s || state.compute[state.kind] !== "cloud") return false;
+    const r = await api("/easy/cloud/runtime?space=" + encodeURIComponent(s.id));
+    if(r.error){ return true; }   // unbekannt -> normal weiter versuchen
+    if(r.stage === "RUNNING") return true;
+    const min = Math.floor((Date.now() - t0) / 60000);
+    if(START[r.stage]){
+      show(`⏳ <b>${esc(START[r.stage])}</b>\n<span>Beim ersten Start lädt der Server das Modell herunter – das dauert oft 5–20 Minuten. Easy Generate wartet automatisch und macht dann hier weiter.</span>\n<span class="hint">Status: ${esc(r.stage)} · ${min} Min.</span>`);
+    } else if(["PAUSED", "SLEEPING", "STOPPED"].includes(r.stage)){
+      show(`⏸ <b>Deine GPU ist ausgeschaltet.</b> <button class="btn pri" type="button" id="wkGo">▶ Jetzt starten</button>\n<span class="hint">Danach dauert es ein paar Minuten, bis sie bereit ist.</span>`);
+      await new Promise(res => { $("#wkGo").onclick = async () => { $("#wkGo").disabled = true; await api("/easy/cloud/wake", { space: s.id }); res(); }; });
+      continue;
+    } else {
+      show(`❌ <b>Die GPU konnte nicht starten (${esc(r.stage || "?")}).</b>\n${r.message ? `<span class="hint">${esc(r.message)}</span>\n` : ""}<span>Häufigste Ursache: Das Modell braucht mehr Grafikspeicher als die gewählte Karte hat. Unter ☁️ Cloud → GPU mieten eine größere Karte wählen („GPU ändern“).</span>`, "err");
+      return false;
+    }
+    await new Promise(res => setTimeout(res, 10000));
   }
 }
 // Gemietete Spaces sind privat: Easy Generate braucht dafür den Space-Schlüssel mit Leserecht.

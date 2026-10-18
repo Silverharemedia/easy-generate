@@ -798,6 +798,33 @@ async def _rented_status():
     return out
 
 
+@routes.get("/easy/cloud/runtime")
+async def cloud_runtime(request):
+    """Zustand einer gemieteten GPU (baut / startet / laeuft / aus)."""
+    sid = request.query.get("space", "")
+    if not mine(sid) or not token():
+        return web.json_response({"error": "unbekannt"}, status=400)
+    try:
+        rt = await hf("GET", f"/api/spaces/{sid}/runtime")
+        hw = rt.get("hardware") or {}
+        return web.json_response({"stage": rt.get("stage"), "hardware": hw.get("current"), "requested": hw.get("requested"),
+                                  "message": (rt.get("errorMessage") or "")[:500]})
+    except HFError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    except Exception as e:
+        return web.json_response({"error": "OFFLINE|" + str(e)}, status=502)
+
+
+@routes.post("/easy/cloud/wake")
+async def cloud_wake(request):
+    data = await request.json()
+    sid = str(data.get("space") or "")
+    if not mine(sid):
+        return web.json_response({"error": "unbekannt"}, status=400)
+    await _wake(sid)
+    return web.json_response({"ok": True})
+
+
 @routes.get("/easy/cloud/rented")
 async def cloud_rented(request):
     if not token():
