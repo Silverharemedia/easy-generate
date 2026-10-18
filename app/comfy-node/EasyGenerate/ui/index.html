@@ -851,7 +851,7 @@ function renderCatalog(){
     d.className = "mc " + cls;
     d.innerHTML = `<div class="th" style="background-image:url('${esc(t.thumb)}')"><span class="st">${st}</span></div>
       <div class="bd"><div class="tt">${esc(t.title)}</div>
-      <div class="tags">${(t.models || []).slice(0, 3).map(m => `<span>${esc(m)}</span>`).join("")}${t.size ? `<span>~${GBf(t.size)}</span>` : ""}${t.license_note ? `<span style="color:var(--warn)" title="${esc(t.license_note)}">⚠ Lizenz: nicht in der EU</span>` : ""}</div>
+      <div class="tags">${(t.models || []).slice(0, 3).map(m => `<span>${esc(m)}</span>`).join("")}${t.size ? `<span>~${GBf(t.size)}</span>` : ""}${t.license_note ? `<span style="color:var(--warn)" title="${esc(t.license_note)}">⚠ Lizenz: nicht in der EU</span>` : ""}${(t.access_need || []).length && !(t.installed && ready) ? `<span style="color:var(--warn)" title="${esc(t.access_need.join(", "))}">🔑 Freischaltung nötig</span>` : ""}</div>
       <div class="ds">${esc(t.description)}</div>
       ${loading ? `<div class="mbar"><div style="width:${pct.toFixed(1)}%"></div></div>` : ""}
       <div class="ac"></div></div>`;
@@ -931,6 +931,8 @@ async function installTemplate(name){
     state.wf[name] = wf; state.info[name] = analyze(wf);
     const missing = (prep.models || []).filter(m => m.status === "missing");
     if(missing.length){
+      const acc = await api("/easy/access_check", { template: name });
+      if(acc.need && acc.need.length && !(await accessDialog(name, acc.need, acc.manual))){ await refreshAll(); return; }
       const d = await api("/easy/models/download", { models: missing, template: name });
       if(d.error) throw new Error(d.error);
       toast(`⬇ „${esc(t.title)}“: ${missing.length} Datei(en) werden geladen.${moved.length ? ` ${moved.length} vorhandene eingesortiert.` : ""}`, "ok");
@@ -958,6 +960,37 @@ async function uninstallDialog(t){
     await refreshAll();
   };
 }
+function accessHelpHtml(repos, manual, idp){
+  return `<b>🔑 Diese Modelle sind bei HuggingFace zugangsbeschränkt.</b> Einmalig freischalten (kostenlos, ca. 2 Minuten):
+      <ol style="margin:8px 0 8px 18px;padding:0">
+        <li>Kostenloses Konto anlegen bzw. anmelden: <a href="https://huggingface.co/join" target="_blank">huggingface.co/join</a></li>
+        <li>${repos.length > 1 ? "Auf jeder dieser Seiten" : "Auf dieser Seite"} auf <b>„Agree and Access“</b> klicken: ${repos.map(r => `<a href="https://huggingface.co/${esc(r)}" target="_blank">${esc(r)}</a>`).join(", ")}</li>
+        <li>Einen Zugangsschlüssel erstellen (Typ <b>„Read“</b>): <a href="https://huggingface.co/settings/tokens/new?tokenType=read" target="_blank">huggingface.co/settings/tokens</a></li>
+        <li>Den Schlüssel hier einfügen${state.cfg.hf_token_set ? " (schon gespeichert – nur nötig, wenn du einen neuen hast)" : ""}:</li>
+      </ol>
+      ${manual ? `<p class="hint" style="margin:0 0 8px">⏳ Bei mindestens einem Anbieter muss die Anfrage erst von Hand bestätigt werden – das kann einige Stunden dauern. Danach einfach erneut prüfen.</p>` : ""}
+      <div class="row"><input type="password" id="${idp}Tok" placeholder="hf_…" autocomplete="off"><button class="btn pri" type="button" id="${idp}Go">Speichern &amp; prüfen</button></div>
+      <div class="hint" id="${idp}Msg" style="margin-top:6px"></div>`;
+}
+function accessDialog(name, need, manual){
+  return new Promise(res => {
+    const t = state.catalog.find(x => x.name === name) || { title: name };
+    $("#modalCard").innerHTML = `<h3>„${esc(t.title)}“ braucht eine Freischaltung</h3><div class="msg warn" style="white-space:normal">${accessHelpHtml(need, manual, "acc")}</div>
+      <div class="actions" style="margin-top:14px"><button class="btn" id="mTry">Trotzdem laden</button><button class="btn" id="mCancel">Abbrechen</button></div>`;
+    $("#modal").classList.remove("hidden");
+    const done = v => { $("#modal").classList.add("hidden"); res(v); };
+    $("#mCancel").onclick = () => done(false);
+    $("#mTry").onclick = () => done(true);
+    $("#accGo").onclick = async () => {
+      const tok = $("#accTok").value.trim();
+      if(tok){ state.cfg = await api("/easy/config", { hf_token: tok }); }
+      $("#accMsg").textContent = "Prüfe Zugang …";
+      const c = await api("/easy/access_check", { template: name });
+      if(!c.need || !c.need.length){ $("#accMsg").textContent = "✅ Zugang bestätigt – lade jetzt."; setTimeout(() => done(true), 700); }
+      else $("#accMsg").textContent = "Noch kein Zugang zu: " + c.need.join(", ") + (c.token_set ? " – hast du überall „Agree and Access“ geklickt?" : " – bitte Schlüssel einfügen.");
+    };
+  });
+}
 let dlState = {}, dlTimer = null;
 async function watchDownload(){
   clearTimeout(dlTimer);
@@ -981,22 +1014,14 @@ async function watchDownload(){
   const other = (s.errors || []).filter(e => !/verweigert|HuggingFace/i.test(e));
   let eh = "";
   if(gated.length){
-    eh += `<div class="msg warn" style="margin-top:8px;white-space:normal">
-      <b>🔑 Diese Modelle sind bei HuggingFace zugangsbeschränkt.</b> Einmalig freischalten (kostenlos, ca. 2 Minuten):
-      <ol style="margin:8px 0 8px 18px;padding:0">
-        <li>Kostenloses Konto anlegen bzw. anmelden: <a href="https://huggingface.co/join" target="_blank">huggingface.co/join</a></li>
-        <li>Auf dieser Seite auf <b>„Agree and Access“</b> klicken: ${repos.map(r => `<a href="https://huggingface.co/${esc(r)}" target="_blank">${esc(r)}</a>`).join(", ")}</li>
-        <li>Einen Zugangsschlüssel erstellen (Typ <b>„Read“</b>): <a href="https://huggingface.co/settings/tokens/new?tokenType=read" target="_blank">huggingface.co/settings/tokens</a></li>
-        <li>Den Schlüssel hier einfügen:</li>
-      </ol>
-      <div class="row"><input type="password" id="dlTok" placeholder="hf_…" autocomplete="off"><button class="btn pri" type="button" id="dlTokGo">Speichern &amp; erneut laden</button></div></div>`;
+    eh += `<div class="msg warn" style="margin-top:8px;white-space:normal">${accessHelpHtml(repos, false, "dl")}</div>`;
   }
   if(other.length) eh += `<div class="msg err" style="margin-top:8px">${other.map(esc).join("\n")}</div>`;
   if(gated.length || other.length) eh += `<button class="btn" type="button" id="dlRetry" style="margin-top:8px">Erneut versuchen</button>`;
   $("#dlErr").innerHTML = eh;
-  if($("#dlTokGo")) $("#dlTokGo").onclick = async () => {
-    const t = $("#dlTok").value.trim(); if(!t) return;
-    await api("/easy/config", { hf_token: t });
+  if($("#dlGo")) $("#dlGo").onclick = async () => {
+    const t = $("#dlTok").value.trim();
+    if(t) state.cfg = await api("/easy/config", { hf_token: t });
     $("#dlRetry").click();
   };
   if($("#dlRetry")) $("#dlRetry").onclick = async () => {

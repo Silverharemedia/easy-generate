@@ -5,6 +5,11 @@
   "use strict";
   const EN = {
     // Navigation & allgemein
+    "Speichern & prüfen": "Save & check", "Prüfe Zugang …": "Checking access …", "✅ Zugang bestätigt – lade jetzt.": "✅ Access confirmed – downloading now.",
+    "Trotzdem laden": "Download anyway", "🔑 Freischaltung nötig": "🔑 Unlock required",
+    "⏳ Bei mindestens einem Anbieter muss die Anfrage erst von Hand bestätigt werden – das kann einige Stunden dauern. Danach einfach erneut prüfen.": "⏳ At least one provider approves requests manually – this can take a few hours. Then simply check again.",
+    "Auf jeder dieser Seiten auf": "On each of these pages, click",
+    "Den Schlüssel hier einfügen (schon gespeichert – nur nötig, wenn du einen neuen hast):": "Paste the token here (already saved – only needed for a new one):",
     "System": "System", "Ausschalten": "Turn off", "✓ aktiv": "✓ active", "– aus –": "– off –",
     "Prompt-Helfer ausgeschaltet.": "Prompt helper turned off.", "Der Prompt-Helfer ist ausgeschaltet.": "The prompt helper is turned off.", "Video": "Video", "Bild": "Image", "Galerie": "Gallery", "Modelle": "Models", "Einstellungen": "Settings",
     "Verbinde …": "Connecting …", "Bereit": "Ready", "ComfyUI nicht erreichbar": "ComfyUI not reachable",
@@ -154,6 +159,11 @@
   };
 
   const RU = {
+   "Speichern & prüfen": "Сохранить и проверить", "Prüfe Zugang …": "Проверяю доступ …", "✅ Zugang bestätigt – lade jetzt.": "✅ Доступ подтверждён – загружаю.",
+   "Trotzdem laden": "Всё равно загрузить", "🔑 Freischaltung nötig": "🔑 Нужен доступ",
+   "⏳ Bei mindestens einem Anbieter muss die Anfrage erst von Hand bestätigt werden – das kann einige Stunden dauern. Danach einfach erneut prüfen.": "⏳ Как минимум один владелец подтверждает запросы вручную – это может занять несколько часов. Потом просто проверь снова.",
+   "Auf jeder dieser Seiten auf": "На каждой из этих страниц нажми",
+   "Den Schlüssel hier einfügen (schon gespeichert – nur nötig, wenn du einen neuen hast):": "Вставь токен сюда (уже сохранён – нужно только для нового):",
    "System": "Система", "Ausschalten": "Выключить", "✓ aktiv": "✓ активна", "– aus –": "– выкл. –",
    "Prompt-Helfer ausgeschaltet.": "Помощник для промптов выключен.", "Der Prompt-Helfer ist ausgeschaltet.": "Помощник для промптов выключен.",
    "Video": "Видео",
@@ -414,6 +424,9 @@
   const PAT = [
     [/^(\d+) Kerne · (\d+) Threads(.*)$/, "$1 cores · $2 threads$3", (m, a, b, c) => `${a} ${ruPl(a, "ядро", "ядра", "ядер")} · ${b} ${ruPl(b, "поток", "потока", "потоков")}${c}`],
     [/^(\d+) Kerne$/, "$1 cores", (m, a) => `${a} ${ruPl(a, "ядро", "ядра", "ядер")}`],
+    [/^„(.+)“ braucht eine Freischaltung$/, "“$1” needs to be unlocked", "«$1» требует доступа"],
+    [/^Noch kein Zugang zu: (.+?) – hast du überall „Agree and Access“ geklickt\?$/, "No access yet to: $1 – did you click “Agree and Access” everywhere?", "Пока нет доступа к: $1 – ты везде нажал «Agree and Access»?"],
+    [/^Noch kein Zugang zu: (.+?) – bitte Schlüssel einfügen\.$/, "No access yet to: $1 – please paste your token.", "Пока нет доступа к: $1 – вставь токен."],
     [/^Bereit · (.+)$/, "Ready · $1", "Готово · $1"],
     [/^(.+) \(Modelle fehlen noch\)$/, "$1 (files still missing)", "$1 (файлы ещё отсутствуют)"],
     [/^(\S+): (Keine Verbindung zum Download-Server.*|Download verweigert.*|Download unvollstaendig.*|Server antwortet mit Fehler (\d+))$/, (m, f, rest) => f + ": " + (D()[rest] || rest.replace(/^Server antwortet mit Fehler/, lang === "ru" ? "Сервер вернул ошибку" : "Server returned error"))],

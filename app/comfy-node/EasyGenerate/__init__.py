@@ -15,7 +15,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -218,11 +218,15 @@ def registry():
 async def easy_catalog(request):
     reg = registry()
     items = []
+    acc = access_cache()
+    if not ACCESS["busy"]:
+        asyncio.create_task(_bg_refresh())      # Zugaenge im Hintergrund pruefen (max. 1x pro Tag)
     for t in catalog():
         ms = template_models(t["name"])
         have = sum(1 for m in ms if model_present(m))
         r = reg.get(t["name"], {})
-        items.append(dict(t, model_count=len(ms), model_have=have,
+        need, manual = access_for_template(t["name"], acc)
+        items.append(dict(t, model_count=len(ms), model_have=have, access_need=need, access_manual=manual,
                           installed=bool(r) and os.path.isfile(os.path.join(WF_DIR, t["name"] + ".json")),
                           enabled=r.get("enabled", True)))
     return web.json_response({"items": items})
@@ -579,6 +583,125 @@ async def easy_models_cancel(request):
 async def easy_models_clear(request):
     DL["queue"] = [x for x in DL["queue"] if x["status"] in ("queued", "loading")]
     return web.json_response({"ok": True})
+
+
+# ---------------------------------------------------------------- Zugangspruefung (HuggingFace)
+# Manche Modelle sind auf HuggingFace "gated": Man muss einmalig zustimmen und einen Schluessel (Token) hinterlegen.
+# Wir pruefen das vorab, damit der Nutzer die Anleitung sieht, bevor ein Download scheitert.
+import hashlib
+import re as _re
+
+ACCESS_FILE = os.path.join(DATA, "access_cache.json")
+ACCESS_TTL = 24 * 3600
+ACCESS = {"busy": False}
+
+
+def hf_repo(url):
+    m = _re.match(r"https://huggingface\.co/([^/]+/[^/]+)/", url or "")
+    return m.group(1) if m else None
+
+
+def token_hash():
+    t = load_cfg().get("hf_token") or ""
+    return hashlib.sha256(t.encode()).hexdigest()[:12] if t else ""
+
+
+async def check_repo(session, repo, sample_url):
+    """Liefert {gated, manual, ok}. ok = Download ist mit dem aktuellen Schluessel moeglich."""
+    token = load_cfg().get("hf_token") or ""
+    headers = {"Authorization": "Bearer " + token} if token else {}
+    info = {"gated": False, "manual": False, "ok": True, "checked": time.time(), "tok": token_hash()}
+    try:
+        async with session.get(f"https://huggingface.co/api/models/{repo}", headers=headers) as r:
+            if r.status == 200:
+                j = await r.json()
+                g = j.get("gated", False)
+                info["gated"] = bool(g)
+                info["manual"] = g == "manual"
+            elif r.status in (401, 403, 404):
+                info["gated"] = True
+        if info["gated"] and sample_url:
+            async with session.head(sample_url, headers=headers, allow_redirects=False) as r:
+                info["ok"] = r.status in (200, 206, 301, 302, 303, 307, 308)
+    except Exception:
+        info["error"] = True
+        info["ok"] = None   # unbekannt (z. B. offline)
+    return info
+
+
+def access_cache():
+    return read_json(ACCESS_FILE, {})
+
+
+def catalog_repos():
+    repos = {}
+    for t in catalog():
+        for m in template_models(t["name"]):
+            r = hf_repo(m["url"])
+            if r and r not in repos:
+                repos[r] = m["url"]
+    return repos
+
+
+async def refresh_access(repos, force=False):
+    cache = access_cache()
+    th = token_hash()
+    todo = {r: u for r, u in repos.items()
+            if force or r not in cache or cache[r].get("tok") != th or time.time() - cache[r].get("checked", 0) > ACCESS_TTL
+            or cache[r].get("ok") is None}
+    if not todo:
+        return cache
+    sem = asyncio.Semaphore(6)
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as s:
+        async def one(r, u):
+            async with sem:
+                cache[r] = await check_repo(s, r, u)
+        await asyncio.gather(*(one(r, u) for r, u in todo.items()))
+    write_json(ACCESS_FILE, cache)
+    return cache
+
+
+async def _bg_refresh():
+    if ACCESS["busy"]:
+        return
+    ACCESS["busy"] = True
+    try:
+        await refresh_access(catalog_repos())
+    except Exception:
+        pass
+    finally:
+        ACCESS["busy"] = False
+
+
+def access_for_template(name, cache, only_missing=False):
+    need, manual = [], False
+    for m in template_models(name):
+        if only_missing and model_present(m):
+            continue
+        r = hf_repo(m["url"])
+        c = cache.get(r) if r else None
+        if c and c.get("gated") and c.get("ok") is False and r not in need:
+            need.append(r)
+            manual = manual or c.get("manual", False)
+    return need, manual
+
+
+@routes.post("/easy/access_check")
+async def easy_access_check(request):
+    """Prueft (frisch) die Zugaenge fuer die fehlenden Dateien einer Vorlage."""
+    data = await request.json()
+    name = str(data.get("template", ""))
+    repos = {}
+    for m in template_models(name):
+        if model_present(m):
+            continue
+        r = hf_repo(m["url"])
+        if r and r not in repos:
+            repos[r] = m["url"]
+    cache = await refresh_access(repos, force=True)
+    need, manual = access_for_template(name, cache, only_missing=True)
+    unknown = [r for r in repos if cache.get(r, {}).get("ok") is None]
+    return web.json_response({"need": need, "manual": manual, "unknown": unknown, "token_set": bool(load_cfg().get("hf_token"))})
 
 
 # ---------------------------------------------------------------- Prompt-Helfer
