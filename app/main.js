@@ -23,7 +23,7 @@ const PACKAGES = {
 };
 const RELEASE_BASE = "https://github.com/comfyanonymous/ComfyUI/releases/latest/download/";
 
-let win = null, cfg = null, quitting = false, comfyChild = null, updateReady = false;
+let win = null, cfg = null, quitting = false, comfyChild = null, updateReady = false, stoppedAt = 0, crashes = [], restarting = false;
 
 // ------------------------------------------------------------------ Konfiguration
 function loadCfg() {
@@ -65,6 +65,7 @@ async function pidOnPort(port) {
   return null;
 }
 async function killComfy() {
+  stoppedAt = Date.now();                              // gewolltes Beenden – kein Absturz
   const port = cfg.comfy && cfg.comfy.port;
   const pids = new Set();
   if (comfyChild && comfyChild.pid) pids.add(comfyChild.pid);
@@ -263,13 +264,49 @@ async function startComfy() {
   comfyChild.on("exit", code => { exited = code; });
   const t0 = Date.now();
   while (Date.now() - t0 < 15 * 60 * 1000) {
-    if (await comfyAt(c.port)) return;
+    if (await comfyAt(c.port)) { watchComfy(comfyChild); return; }
     if (exited !== null || (comfyChild && comfyChild.exitCode !== null)) throw new Error("ComfyUI hat sich beim Start beendet.\n\n" + tailLog(1500));
     const last = tailLog(300).split(/\r?\n/).filter(Boolean).pop() || "";
     status("Starte die KI im Hintergrund …", { phase: "start", detail: `${Math.round((Date.now() - t0) / 1000)} s · ${last.slice(0, 120)}` });
     await sleep(1000);
   }
   throw new Error("ComfyUI startet nicht (Zeitüberschreitung).\n\n" + tailLog(1500));
+}
+
+// ------------------------------------------------------------------ Absturz von ComfyUI erkennen
+// Stürzt ComfyUI während der Arbeit ab (z. B. zu wenig Speicher beim Laden eines großen Modells),
+// sagt Easy Generate das deutlich, sichert das Protokoll und startet ComfyUI selbst neu.
+function crashReason(log) {
+  if (/access violation|0xC0000005|out of memory|OutOfMemory|hipErrorOutOfMemory|MemoryError|not enough memory|DefaultCPUAllocator|Speicher/i.test(log)) {
+    const m = log.match(/paths=\['([^']+)'\][^\n]*\n(?:(?!paths=)[\s\S])*$/) || log.match(/Requested to load (\S+)(?![\s\S]*Requested to load)/);
+    return { kind: "memory", model: m ? path.win32.basename(m[1].replace(/\\\\/g, "\\")) : "" };
+  }
+  return { kind: "other", model: "" };
+}
+function watchComfy(child) {
+  if (!child) return;
+  child.on("exit", code => {
+    if (quitting || child !== comfyChild || Date.now() - stoppedAt < 30000) return;   // gewollt beendet
+    const log = tailLog(20000);
+    try { fs.writeFileSync(path.join(app.getPath("userData"), "comfyui-crash.log"), log); } catch (e) {}
+    const r = crashReason(log);
+    crashes = crashes.filter(t => Date.now() - t < 5 * 60 * 1000); crashes.push(Date.now());
+    cfg.lastCrash = { at: Date.now(), code, reason: r.kind, model: r.model, auto: crashes.length < 3 }; saveCfg();
+    comfyChild = null;
+    send("comfy:crashed", cfg.lastCrash);
+    if (crashes.length < 3) restartAfterCrash();   // mehrfach hintereinander: nicht endlos neu starten
+  });
+}
+async function restartAfterCrash() {
+  if (restarting) return;
+  restarting = true;
+  try {
+    await sleep(1500);
+    await startComfy();
+    if (win && !win.isDestroyed()) await win.loadURL(`http://127.0.0.1:${cfg.comfy.port}/easy`);
+  } catch (e) {
+    if (win && !win.isDestroyed()) { await win.loadFile(path.join(__dirname, "setup.html")); send("setup:error", { message: String(e.message || e) }); }
+  } finally { restarting = false; }
 }
 
 async function launch() {
@@ -354,6 +391,15 @@ function createWindow() {
         de: { b: ["Ja, schließen", "Nein, weiterlaufen lassen"], m: "Soll ComfyUI auch geschlossen werden?", d: "Das gibt den Grafikspeicher wieder frei. Lässt du es laufen, startet Easy Generate beim nächsten Mal schneller.", c: "Nicht mehr fragen – ComfyUI immer automatisch schließen" },
         en: { b: ["Yes, close it", "No, keep it running"], m: "Close ComfyUI as well?", d: "This frees your graphics memory. If you keep it running, Easy Generate starts faster next time.", c: "Don't ask again – always close ComfyUI automatically" },
         ru: { b: ["Да, закрыть", "Нет, оставить запущенным"], m: "Закрыть и ComfyUI?", d: "Это освободит видеопамять. Если оставить его запущенным, Easy Generate в следующий раз запустится быстрее.", c: "Больше не спрашивать – всегда закрывать ComfyUI автоматически" },
+        fr: { b: ["Oui, le fermer", "Non, le laisser tourner"], m: "Fermer aussi ComfyUI ?", d: "Cela libère la mémoire graphique. Si vous le laissez tourner, Easy Generate démarrera plus vite la prochaine fois.", c: "Ne plus demander – toujours fermer ComfyUI automatiquement" },
+        es: { b: ["Sí, cerrarlo", "No, dejarlo en marcha"], m: "¿Cerrar también ComfyUI?", d: "Así se libera la memoria gráfica. Si lo dejas en marcha, Easy Generate arrancará más rápido la próxima vez.", c: "No volver a preguntar – cerrar siempre ComfyUI automáticamente" },
+        pl: { b: ["Tak, zamknij", "Nie, zostaw uruchomiony"], m: "Zamknąć również ComfyUI?", d: "To zwolni pamięć karty graficznej. Jeśli zostawisz go uruchomionego, Easy Generate następnym razem uruchomi się szybciej.", c: "Nie pytaj więcej – zawsze zamykaj ComfyUI automatycznie" },
+        cs: { b: ["Ano, zavřít", "Ne, nechat běžet"], m: "Zavřít také ComfyUI?", d: "Tím se uvolní grafická paměť. Když ho necháš běžet, Easy Generate se příště spustí rychleji.", c: "Už se neptat – ComfyUI vždy automaticky zavřít" },
+        hr: { b: ["Da, zatvori", "Ne, neka radi"], m: "Zatvoriti i ComfyUI?", d: "Time se oslobađa grafička memorija. Ako ga ostaviš pokrenutim, Easy Generate će se sljedeći put brže pokrenuti.", c: "Ne pitaj više – uvijek automatski zatvori ComfyUI" },
+        ar: { b: ["نعم، أغلقه", "لا، اتركه يعمل"], m: "هل تريد إغلاق ComfyUI أيضًا؟", d: "سيؤدي ذلك إلى تحرير ذاكرة الرسومات. إذا تركته يعمل، فسيبدأ Easy Generate بشكل أسرع في المرة القادمة.", c: "لا تسأل مرة أخرى – أغلق ComfyUI تلقائيًا دائمًا" },
+        hi: { b: ["हाँ, बंद करें", "नहीं, चलने दें"], m: "क्या ComfyUI को भी बंद करें?", d: "इससे ग्राफ़िक्स मेमोरी खाली हो जाती है। अगर आप इसे चलने देते हैं, तो Easy Generate अगली बार जल्दी शुरू होगा।", c: "फिर से न पूछें – ComfyUI को हमेशा अपने आप बंद करें" },
+        zh: { b: ["是，关闭", "否，保持运行"], m: "同时关闭 ComfyUI 吗？", d: "这样会释放显存。如果保持运行，下次 Easy Generate 启动会更快。", c: "不再询问 – 始终自动关闭 ComfyUI" },
+        ja: { b: ["はい、閉じます", "いいえ、実行したままにします"], m: "ComfyUI も閉じますか？", d: "グラフィックメモリが解放されます。実行したままにすると、次回 Easy Generate がより速く起動します。", c: "今後は確認しない – ComfyUI を常に自動で閉じる" },
       }[cfg.lang] || null;
       const t = T || { b: ["Ja, schließen", "Nein, weiterlaufen lassen"], m: "Soll ComfyUI auch geschlossen werden?", d: "Das gibt den Grafikspeicher wieder frei.", c: "Nicht mehr fragen – ComfyUI immer automatisch schließen" };
       const r = await dialog.showMessageBox(win, {
@@ -479,7 +525,10 @@ async function pauseRented() {
 ipcMain.handle("app:showItem", (e, p) => { try { if (typeof p === "string" && fs.existsSync(p)) shell.showItemInFolder(p); } catch (err) {} return true; });
 ipcMain.handle("app:openFolder", (e, p) => { try { if (typeof p === "string" && fs.existsSync(p) && fs.statSync(p).isDirectory()) shell.openPath(p); } catch (err) {} return true; });
 ipcMain.handle("app:chooseGalleryDir", async (e, start) => {
-  const T = { de: "Ordner für deine Videos und Bilder wählen", en: "Choose a folder for your videos and images", ru: "Выбери папку для видео и изображений" };
+  const T = { de: "Ordner für deine Videos und Bilder wählen", en: "Choose a folder for your videos and images", ru: "Выбери папку для видео и изображений",
+    fr: "Choisir un dossier pour vos vidéos et images", es: "Elige una carpeta para tus vídeos e imágenes", pl: "Wybierz folder na swoje filmy i obrazy",
+    cs: "Vyber složku pro svá videa a obrázky", hr: "Odaberi mapu za svoje videozapise i slike", ar: "اختر مجلدًا لمقاطع الفيديو والصور",
+    hi: "अपने वीडियो और चित्रों के लिए फ़ोल्डर चुनें", zh: "选择存放视频和图片的文件夹", ja: "動画と画像の保存先フォルダーを選択" };
   const r = await dialog.showOpenDialog(win, { title: T[cfg.lang] || T.de, defaultPath: start || app.getPath("videos"), properties: ["openDirectory", "createDirectory"] });
   return r.canceled ? null : r.filePaths[0];
 });
@@ -506,6 +555,7 @@ ipcMain.handle("app:openPath", (e, which) => {
   if (p && exists(p)) shell.openPath(p);
   return true;
 });
+ipcMain.handle("app:lastCrash", () => cfg.lastCrash || null);
 ipcMain.handle("app:restartComfy", async () => { await win.loadFile(path.join(__dirname, "setup.html")); await killComfy(); await launch(); return true; });
 ipcMain.handle("app:updateComfy", () => updateComfy());
 ipcMain.handle("app:changeComfy", async () => { await win.loadFile(path.join(__dirname, "setup.html")); send("setup:wizard", {}); return true; });
@@ -576,7 +626,8 @@ async function installOllama() {
 ipcMain.handle("app:ollamaInfo", async () => ({ installed: !!ollamaExe(), running: !!(await ollamaUp()) }));
 ipcMain.handle("app:installOllama", () => installOllama());
 ipcMain.handle("app:startOllama", () => startOllama());
-ipcMain.handle("app:setLang", (e, l) => { if (["de", "en", "ru"].includes(l)) { cfg.lang = l; saveCfg(); } return true; });
+const LANG_CODES = ["de", "en", "ru", "fr", "es", "pl", "cs", "hr", "ar", "hi", "zh", "ja"];
+ipcMain.handle("app:setLang", (e, l) => { if (LANG_CODES.includes(l)) { cfg.lang = l; saveCfg(); } return true; });
 ipcMain.handle("app:getLang", () => cfg.lang || "de");
 
 // ------------------------------------------------------------------ Start

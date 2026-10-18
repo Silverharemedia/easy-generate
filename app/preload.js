@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld("easyApp", {
   onUpdate: cb => on("app:update", cb),
   openPath: w => ipcRenderer.invoke("app:openPath", w),
   restartComfy: () => ipcRenderer.invoke("app:restartComfy"),
+  lastCrash: () => ipcRenderer.invoke("app:lastCrash"),
+  onComfyCrash: cb => on("comfy:crashed", cb),
   updateComfy: () => ipcRenderer.invoke("app:updateComfy"),
   changeComfy: () => ipcRenderer.invoke("app:changeComfy"),
   ollamaInfo: () => ipcRenderer.invoke("app:ollamaInfo"),

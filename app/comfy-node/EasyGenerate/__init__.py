@@ -7,6 +7,7 @@ Es werden keine Knoten hinzugefuegt.
 import asyncio
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -15,7 +16,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.7.1"
+VERSION = "1.8.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -49,6 +50,15 @@ def write_json(path, data):
 @routes.get("/easy")
 async def easy_page(request):
     return web.FileResponse(UI_FILE, headers={"Cache-Control": "no-store"})
+
+
+@routes.get("/easy/lang/{code}.js")
+async def easy_lang(request):
+    code = request.match_info["code"]
+    f = os.path.join(HERE, "ui", "lang", code + ".js")
+    if not re.fullmatch(r"[a-z]{2}", code) or not os.path.isfile(f):
+        return web.Response(status=404)
+    return web.FileResponse(f, headers={"Cache-Control": "no-store", "Content-Type": "application/javascript"})
 
 
 @routes.get("/easy/i18n.js")

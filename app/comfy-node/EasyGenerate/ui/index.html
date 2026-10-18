@@ -163,6 +163,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
   </aside>
 
   <main>
+  <div id="crashBox" class="msg err hidden" style="margin-bottom:14px"></div>
   <div class="wrap">
 
   <!-- STUDIO (Video + Bild) -->
@@ -734,13 +735,41 @@ async function checkStatus(){
   try{
     const j = await (await fetch("/system_stats", { cache: "no-store" })).json();
     const d = (j.devices || [])[0];
-    online = true; $("#dot").classList.add("on");
+    online = true; $("#dot").classList.add("on"); offlineSince = null;
+    if(crashLive === "noresp"){ crashLive = null; $("#crashBox").classList.add("hidden"); }
     let t = "Bereit";
     if(d && d.vram_total) t += ` · ${((d.vram_total - (d.vram_free || 0)) / 1073741824).toFixed(1)}/${(d.vram_total / 1073741824).toFixed(0)} GB`;
     $("#statusTxt").textContent = t;
     $("#statusTxt").title = d ? String(d.name || "") : "";
-  }catch(e){ online = false; $("#dot").classList.remove("on"); $("#statusTxt").textContent = "ComfyUI nicht erreichbar"; }
+  }catch(e){
+    online = false; $("#dot").classList.remove("on"); $("#statusTxt").textContent = "ComfyUI nicht erreichbar";
+    offlineSince = offlineSince || Date.now();
+    if(!crashLive && Date.now() - offlineSince > 10000){ crashLive = "noresp"; showCrash("noresp", {}); }
+  }
   if(state.tab === "video" || state.tab === "image") updateGo();
+}
+// ComfyUI abgestürzt / antwortet nicht: deutlich anzeigen, Neustart anbieten (das Programm startet nach einem Absturz selbst neu)
+let offlineSince = null, crashLive = null;
+function showCrash(kind, opts){
+  const el = $("#crashBox"); if(!el) return;
+  const o = opts || {};
+  const head = kind === "memory" ? "⚠️ ComfyUI ist abgestürzt – vermutlich war der Arbeitsspeicher voll (großes Modell)." : kind === "other" ? "⚠️ ComfyUI wurde unerwartet beendet." : kind === "after" ? "ComfyUI war abgestürzt und wurde neu gestartet." : "⚠️ ComfyUI antwortet nicht mehr.";
+  el.className = "msg " + (kind === "after" ? "warn" : "err");
+  el.innerHTML = `<div><b>${esc(T(head))}</b></div>
+    ${o.auto ? `<div style="margin-top:4px">${esc(T("Es wird automatisch neu gestartet …"))}</div>` : ""}
+    ${o.memory ? `<div style="margin-top:4px">${esc(T("Tipp: kleinere Größe („Schnell“) oder ein kleineres Modell wählen – oder dieses Modell auf der 🚀 Cloud-GPU erstellen."))}</div>` : ""}
+    <div class="actions" style="margin-top:8px">${!o.auto && kind !== "after" && host && host.restartComfy ? `<button class="btn pri" type="button" id="crashRestart">${esc(T("🔄 ComfyUI neu starten"))}</button>` : ""}<button class="btn" type="button" id="crashHide">${esc(T("Ausblenden"))}</button></div>`;
+  el.classList.remove("hidden");
+  if($("#crashRestart")) $("#crashRestart").onclick = () => { $("#crashRestart").disabled = true; host.restartComfy(); };
+  $("#crashHide").onclick = () => { el.classList.add("hidden"); if(o.at) store.set("crashSeen", o.at); };
+}
+if(host && host.onComfyCrash) host.onComfyCrash(d => { crashLive = d; showCrash(d.reason === "memory" ? "memory" : "other", { auto: d.auto, memory: d.reason === "memory", at: d.at }); });
+async function crashNotice(){
+  if(!host || !host.lastCrash) return;
+  try{
+    const c = await host.lastCrash();
+    if(c && c.at && Date.now() - c.at < 15 * 60 * 1000 && store.get("crashSeen", 0) !== c.at){ showCrash("after", { memory: c.reason === "memory", at: c.at }); }
+  }catch(e){}
 }
 function connectWS(){
   try{
@@ -2740,7 +2769,7 @@ $("#olStart").onclick = async () => {
 
 /* ================= Einstellungen ================= */
 async function renderSettings(){
-  chips($("#langChips"), [["de", { n: "🇩🇪 Deutsch" }], ["en", { n: "🇬🇧 English" }], ["ru", { n: "🇷🇺 Русский" }]], (window.EG_I18N && EG_I18N.lang) || "de", l => { if(window.EG_I18N && l !== EG_I18N.lang) EG_I18N.setLang(l); });
+  chips($("#langChips"), ((window.EG_I18N && EG_I18N.langs) || [["de", "🇩🇪", "Deutsch"]]).map(([c, f, n]) => [c, { n: f + " " + n }]), (window.EG_I18N && EG_I18N.lang) || "de", l => { if(window.EG_I18N && l !== EG_I18N.lang) EG_I18N.setLang(l); });
   state.cfg = await api("/easy/config");
   // KI
   const PROV = [["ollama", { n: "Lokal (Ollama)", sub: "kostenlos, privat" }], ["claude", { n: "Claude", sub: "beste Qualität" }]];
@@ -2830,6 +2859,7 @@ function showUpdate(v){
   if(!["video", "image", "cloud", "gal", "models", "set"].includes(t)) t = "video";
   showTab(t);
   restoreJobs();
+  crashNotice();
   watchDownload();
   loadCatalog(true);
   gallerySetup(false);

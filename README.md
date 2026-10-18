@@ -18,6 +18,7 @@ Updates installiert Easy Generate selbst (Einstellungen → „Nach Updates such
 - 📁 **Galerie** aller Ergebnisse, nach Modell sortiert (Speicherort frei wählbar oder ganz abschaltbar).
 - ☁️ **Cloud** über Hugging Face – kostenlose ZeroGPU-Spaces, Bezahlung pro Video oder eine eigene gemietete Cloud-GPU mit ComfyUI. Dein Hugging-Face-Schlüssel bleibt auf deinem PC und wird nur an Hugging Face selbst gesendet.
 - 🌡️ **Monitor** mit Auslastung und Temperaturen von CPU und GPU.
+- 🌍 **12 Sprachen:** Deutsch, English, Français, Español, Polski, Čeština, Hrvatski, Русский, العربية, हिन्दी, 中文, 日本語.
 
 ## Aufbau
 

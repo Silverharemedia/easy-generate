@@ -1,8 +1,26 @@
-// Easy Generate – Übersetzung Deutsch → Englisch / Russisch.
-// Die Oberfläche ist auf Deutsch geschrieben; ist Englisch gewählt, übersetzt dieses Skript
-// alle Texte im Fenster (auch später eingefügte) anhand der Tabelle unten.
+// Easy Generate – Übersetzung. Die Oberfläche ist auf Deutsch geschrieben; ist eine andere Sprache gewählt,
+// übersetzt dieses Skript alle Texte im Fenster (auch später eingefügte).
+// Englisch und Russisch stehen unten; weitere Sprachen liegen je in lang/<code>.js und werden nur bei Bedarf geladen.
 (function () {
   "use strict";
+  const LANGS = [
+    ["de", "🇩🇪", "Deutsch"], ["en", "🇬🇧", "English"], ["fr", "🇫🇷", "Français"], ["es", "🇪🇸", "Español"],
+    ["pl", "🇵🇱", "Polski"], ["cs", "🇨🇿", "Čeština"], ["hr", "🇭🇷", "Hrvatski"], ["ru", "🇷🇺", "Русский"],
+    ["ar", "🇸🇦", "العربية"], ["hi", "🇮🇳", "हिन्दी"], ["zh", "🇨🇳", "中文"], ["ja", "🇯🇵", "日本語"],
+  ];
+  const CODES = LANGS.map(l => l[0]);
+  const RTL = ["ar"];
+  let lang = "de";
+  try { lang = localStorage.getItem("eg_lang") || "de"; } catch (e) {}
+  if (!CODES.includes(lang)) lang = "de";
+  // Zusätzliche Sprache: Datei neben diesem Skript sofort mitladen (vor dem Rest der Seite)
+  if (!["de", "en", "ru"].includes(lang)) {
+    try {
+      const me = document.currentScript && document.currentScript.src;
+      if (me) document.write('<script src="' + me.replace(/i18n\.js(\?.*)?$/, "lang/" + lang + ".js") + '"><\/script>');
+    } catch (e) {}
+  }
+  const XD = () => window.EG_LANG_DATA || { dict: {}, tpl: {}, pat: {} };
   const EN = {
     // Navigation & allgemein
     "Speichern & prüfen": "Save & check", "Prüfe Zugang …": "Checking access …", "✅ Zugang bestätigt – lade jetzt.": "✅ Access confirmed – downloading now.",
@@ -429,7 +447,7 @@
     [/^Noch kein Zugang zu: (.+?) – bitte Schlüssel einfügen\.$/, "No access yet to: $1 – please paste your token.", "Пока нет доступа к: $1 – вставь токен."],
     [/^Bereit · (.+)$/, "Ready · $1", "Готово · $1"],
     [/^(.+) \(Modelle fehlen noch\)$/, "$1 (files still missing)", "$1 (файлы ещё отсутствуют)"],
-    [/^(\S+): (Keine Verbindung zum Download-Server.*|Download verweigert.*|Download unvollstaendig.*|Server antwortet mit Fehler (\d+))$/, (m, f, rest) => f + ": " + (D()[rest] || rest.replace(/^Server antwortet mit Fehler/, lang === "ru" ? "Сервер вернул ошибку" : "Server returned error"))],
+    [/^(\S+): (Keine Verbindung zum Download-Server.*|Download verweigert.*|Download unvollstaendig.*|Server antwortet mit Fehler (\d+))$/, (m, f, rest) => f + ": " + (look(rest) || rest.replace(/^Server antwortet mit Fehler/, lang === "ru" ? "Сервер вернул ошибку" : "Server returned error"))],
     [/^Schritt (\d+) von (\d+)$/, "Step $1 of $2", "Шаг $1 из $2"],
     [/^Arbeite: (.+)$/, "Working: $1", "Работаю: $1"],
     [/^Fertig in (.+) Min\.$/, "Done in $1 min.", "Готово за $1 мин."],
@@ -702,6 +720,15 @@
     ["Fertig, aber keine Ausgabe gefunden. Schau in den Ausgabe-Ordner.", "Done, but no output found. Check the output folder.", "Готово, но результат не найден. Посмотри в папке вывода."],
     ["Fertig – hole das Ergebnis von der Cloud-GPU …", "Done – fetching the result from the cloud GPU …", "Готово – забираю результат с облачной GPU …"],
     ["Diese Cloud-GPU gibt es nicht mehr.", "This cloud GPU no longer exists.", "Этой облачной GPU больше нет."],
+    ["☁️ Oder in der Cloud erstellen – ohne Download", "☁️ Or create in the cloud – no download", "☁️ Или создать в облаке – без загрузки"], ["/Std.", "/h", "/ч"],
+    ["⚠️ ComfyUI ist abgestürzt – vermutlich war der Arbeitsspeicher voll (großes Modell).", "⚠️ ComfyUI crashed – the memory was probably full (large model).", "⚠️ ComfyUI аварийно завершился – вероятно, закончилась память (большая модель)."],
+    ["⚠️ ComfyUI wurde unerwartet beendet.", "⚠️ ComfyUI stopped unexpectedly.", "⚠️ ComfyUI неожиданно завершился."],
+    ["Es wird automatisch neu gestartet …", "It is restarting automatically …", "Он перезапускается автоматически …"],
+    ["Tipp: kleinere Größe („Schnell“) oder ein kleineres Modell wählen – oder dieses Modell auf der 🚀 Cloud-GPU erstellen.", "Tip: choose a smaller size (“Fast”) or a smaller model – or create with this model on the 🚀 cloud GPU.", "Совет: выбери меньший размер («Быстро») или модель поменьше – или создавай этой моделью на 🚀 облачной GPU."],
+    ["⚠️ ComfyUI antwortet nicht mehr.", "⚠️ ComfyUI is no longer responding.", "⚠️ ComfyUI больше не отвечает."],
+    ["🔄 ComfyUI neu starten", "🔄 Restart ComfyUI", "🔄 Перезапустить ComfyUI"],
+    ["ComfyUI war abgestürzt und wurde neu gestartet.", "ComfyUI had crashed and was restarted.", "ComfyUI аварийно завершился и был перезапущен."],
+    ["Ausblenden", "Hide", "Скрыть"],
     ["Pausiert – kostet jetzt nichts mehr.", "Paused – no more costs now.", "Приостановлено – больше ничего не стоит."],
     ["Kein Guthaben vorhanden – zum Mieten zuerst bei HuggingFace Guthaben aufladen.", "No credit available – top up at HuggingFace before renting.", "Нет баланса – перед арендой пополни баланс на HuggingFace."],
     ["✓ Bei HuggingFace angemeldet.", "✓ Signed in to HuggingFace.", "✓ Вход в HuggingFace выполнен."],
@@ -727,9 +754,29 @@
     ["Windows gibt die CPU-Temperatur ohne Zusatzprogramm meist nicht heraus. Läuft LibreHardwareMonitor, zeigt Easy Generate sie hier an.", "Windows usually doesn't report the CPU temperature without an extra tool. If LibreHardwareMonitor is running, Easy Generate shows it here.", "Windows обычно не сообщает температуру CPU без дополнительной программы. Если запущен LibreHardwareMonitor, Easy Generate покажет её здесь."],
   ];
   for (const [de, en, ru] of CLOUD) { EN[de] = en; RU[de] = ru; }
-  const tTask = s => ({ "Text → Video": ["Text → Video", "Текст → Видео"], "Bild → Video": ["Image → Video", "Изображение → Видео"], "Text → Bild": ["Text → Image", "Текст → Изображение"], "Bild bearbeiten": ["Edit image", "Редактировать"] }[s] || [s, s])[lang === "ru" ? 1 : 0];
-  const L = (en, ru) => lang === "ru" ? ru : en;
+  const tTask = s => lang === "ru" || lang === "en" ? ({ "Text → Video": ["Text → Video", "Текст → Видео"], "Bild → Video": ["Image → Video", "Изображение → Видео"], "Text → Bild": ["Text → Image", "Текст → Изображение"], "Bild bearbeiten": ["Edit image", "Редактировать"] }[s] || [s, s])[lang === "ru" ? 1 : 0] : ((XD().dict || {})[s] || EN[s] || s);
+  // L(englisch, russisch): weitere Sprachen übersetzen den fertigen englischen Text über Vorlagen ({0}, {1} …)
+  const L = (en, ru) => lang === "ru" ? ru : lang === "en" ? en : xl(en);
+  let TPL = null;
+  function xl(en) {
+    const x = XD(), t = x.tpl || {};
+    if (Object.prototype.hasOwnProperty.call(t, en)) return t[en];
+    if (!TPL) {
+      const esc = v => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      TPL = Object.keys(t).filter(k => /\{\d+\}/.test(k)).sort((a, b) => b.replace(/\{\d+\}/g, "").length - a.replace(/\{\d+\}/g, "").length).map(k => {
+        const ids = []; const re = "^" + k.split(/(\{\d+\})/).map(p => { const m = p.match(/^\{(\d+)\}$/); if (m) { ids.push(+m[1]); return "([\\s\\S]*?)"; } return esc(p); }).join("") + "$";
+        return [new RegExp(re), ids, t[k]];
+      });
+    }
+    for (const [re, ids, out] of TPL) {
+      const m = en.match(re); if (!m) continue;
+      const val = {}; ids.forEach((id, i) => { val[id] = m[i + 1]; });
+      return out.replace(/\{(\d+)\}/g, (a, n) => val[n] != null ? val[n] : a);
+    }
+    return en;
+  }
   PAT.unshift(
+    [/^(🚀 GPU \d+.*)\/Std\.$/, (m, a) => tr(a) + (look("/Std.") || "/h")],
     [/^(\d+) wartende Aufträge entfernt\.$/, (m, n) => L(`${n} waiting jobs removed.`, `Удалено ожидающих заданий: ${n}.`)],
     [/^GPU (\d+) gibt es schon\.$/, (m, n) => L(`GPU ${n} already exists.`, `GPU ${n} уже есть.`)],
     [/^Weitere Cloud-GPU mieten \(GPU (\d+)\)$/, (m, n) => L(`Rent another cloud GPU (GPU ${n})`, `Арендовать ещё одну облачную GPU (GPU ${n})`)],
@@ -740,18 +787,18 @@
     [/^Std\. \(GPU (\d+) läuft\)$/, (m, n) => L(`h (GPU ${n} is running)`, `ч (работает GPU ${n})`)],
     [/^Fertig in (\d+:\d+) Min\.$/, (m, t) => L(`Done in ${t} min.`, `Готово за ${t} мин.`)],
     [/^(🚀 GPU \d+|🖥️ [^:]+): (.+)$/, (m, a, rest) => a + ": " + tr(rest)],
-    [/^Dein kostenloses GPU-Tageskontingent bei HuggingFace ist aufgebraucht( \(noch (\d+) s übrig, dieses Video bräuchte mehr\))?\.$/, (m, a, n) => L("Your free daily GPU quota at HuggingFace is used up" + (n ? ` (${n} s left, this video would need more)` : "") + ".", "Твоя бесплатная дневная квота GPU на HuggingFace исчерпана" + (n ? ` (осталось ${n} с, этому видео нужно больше)` : "") + ".")],
+    [/^Dein kostenloses GPU-Tageskontingent bei HuggingFace ist aufgebraucht( \(noch (\d+) s übrig, dieses Video bräuchte mehr\))?\.$/, (m, a, n) => n ? L(`Your free daily GPU quota at HuggingFace is used up (${n} s left, this video would need more).`, `Твоя бесплатная дневная квота GPU на HuggingFace исчерпана (осталось ${n} с, этому видео нужно больше).`) : L("Your free daily GPU quota at HuggingFace is used up.", "Твоя бесплатная дневная квота GPU на HuggingFace исчерпана.")],
     [/^@(\S+) · Schlüssel: (.+)$/, (m, u, r) => `@${u} · ${L("Token", "Токен")}: ${r === "Fein abgestuft" ? L("Fine-grained", "Fine-grained") : r}`],
     [/^Verbraucht bis (.+)$/, (m, d) => L("Used until ", "Потрачено до ") + d],
     [/^Die (\$[\d.]+) inklusive werden zuerst verbraucht, danach dein Guthaben\.$/, (m, v) => L(`The ${v} included are used first, then your credit.`, `Сначала тратятся включённые ${v}, затем твой баланс.`)],
     [/^Der zeigt HuggingFace nur, wer du bist, damit dein Tageskontingent \((\d+) Min\. GPU\) gilt\.$/, (m, n) => L(`It only tells HuggingFace who you are, so that your daily quota (${n} min GPU) applies.`, `Он только сообщает HuggingFace, кто ты, чтобы действовала твоя дневная квота (${n} мин GPU).`)],
-    [/^Reicht meist für 2–8 kurze Videos am Tag, je nach Space\.( Mit PRO 40 Min\. pro Tag\.)?( Zuletzt gemeldet: noch (\d+) s übrig\.)?$/, (m, p, z, n) => L("Usually enough for 2–8 short videos a day, depending on the Space." + (p ? " With PRO 40 min per day." : "") + (z ? ` Last reported: ${n} s left.` : ""), "Обычно хватает на 2–8 коротких видео в день, в зависимости от Space." + (p ? " С PRO 40 мин в день." : "") + (z ? ` Последнее сообщение: осталось ${n} с.` : ""))],
+    [/^Reicht meist für 2–8 kurze Videos am Tag, je nach Space\.( Mit PRO 40 Min\. pro Tag\.)?( Zuletzt gemeldet: noch (\d+) s übrig\.)?$/, (m, p, z, n) => L("Usually enough for 2–8 short videos a day, depending on the Space.", "Обычно хватает на 2–8 коротких видео в день, в зависимости от Space.") + (p ? " " + L("With PRO 40 min per day.", "С PRO 40 мин в день.") : "") + (z ? " " + L(`Last reported: ${n} s left.`, `Последнее сообщение: осталось ${n} с.`) : "")],
     [/^Video 5 s · (.+)$/, (m, a) => L("Video 5 s · ", "Видео 5 с · ") + a],
     [/^GPU mieten · (.+)$/, (m, a) => L("Rent GPU · ", "Аренда GPU · ") + a],
     [/^(.*?)(\$[\d.]+)\/Std\.$/, (m, a, v) => a + v + L("/h", "/ч")],
     [/^(\d+(?:,\d+)?) Std\. mit deinem Guthaben$/, (m, a) => L(`${a} h with your credit`, `${a} ч с твоим балансом`)],
     [/^Installation fehlgeschlagen: (.+)$/, (m, a) => L("Installation failed: ", "Установка не удалась: ") + a],
-    [/^Keine Modelle gefunden( – es gibt noch (\d+) Stil-Varianten \(Haken oben\))?\.$/, (m, x, n) => L("No models found" + (x ? ` – there are ${n} more style variants (checkbox above)` : "") + ".", "Модели не найдены" + (x ? ` – есть ещё ${n} стилевых вариантов (галочка выше)` : "") + ".")],
+    [/^Keine Modelle gefunden( – es gibt noch (\d+) Stil-Varianten \(Haken oben\))?\.$/, (m, x, n) => x ? L(`No models found – there are ${n} more style variants (checkbox above).`, `Модели не найдены – есть ещё ${n} стилевых вариантов (галочка выше).`) : L("No models found.", "Модели не найдены.")],
     [/^„(.+)“ auf (.+) mieten\?$/, (m, a, b) => L(`Rent “${a}” on ${b}?`, `Арендовать «${a}» на ${b}?`)],
     [/^Kosten: (.+) pro Stunde, solange der Space läuft\. Ohne Nutzung schaltet er sich automatisch aus\.$/, (m, a) => L(`Cost: ${a} per hour while the Space runs. When unused, it switches itself off automatically.`, `Стоимость: ${a} в час, пока Space работает. Без использования он выключается автоматически.`)],
     [/^„(.+)“ endgültig löschen\?$/, (m, a) => L(`Delete “${a}” permanently?`, `Удалить «${a}» навсегда?`)],
@@ -764,7 +811,7 @@
     [/^💳 ca\. (\$[\d.]+) (pro 5-s-Video|pro Bild)$/, (m, v, u) => `💳 ${L("approx.", "около")} ${v} ${u === "pro Bild" ? L("per image", "за изображение") : L("per 5 s video", "за 5-сек. видео")}`],
     [/^🖥️ Gemietet · (.+)$/, (m, a) => `🖥️ ${L("Rented", "Арендован")} · ${tr(a)}`],
     [/^Anbieter: (.+)$/, (m, a) => L("Provider: ", "Провайдер: ") + a],
-    [/^In der Warteschlange: Platz (\d+)( von (\d+))?$/, (m, a, x, b) => L(`In the queue: position ${a}` + (x ? ` of ${b}` : ""), `В очереди: место ${a}` + (x ? ` из ${b}` : ""))],
+    [/^In der Warteschlange: Platz (\d+)( von (\d+))?$/, (m, a, x, b) => x ? L(`In the queue: position ${a} of ${b}`, `В очереди: место ${a} из ${b}`) : L(`In the queue: position ${a}`, `В очереди: место ${a}`)],
     [/^Fertig in (.+) Min\. · Kosten ca\. (\$[\d.]+) \(wird von deinem HuggingFace-Guthaben abgebucht\)$/, (m, t, c) => L(`Done in ${t} min. · cost approx. ${c} (deducted from your HuggingFace credit)`, `Готово за ${t} мин. · стоимость около ${c} (списывается с баланса HuggingFace)`)],
     [/^Space nicht gefunden \((\d+)\)\.$/, (m, a) => L(`Space not found (${a}).`, `Space не найден (${a}).`)],
     [/^(?!Schritt )([^:]{1,40}): (\d+) von (\d+)$/, (m, a, x, y) => `${a}: ${x} ${L("of", "из")} ${y}`],
@@ -790,10 +837,15 @@
     [/^ca\. (.+)$/, (m, a) => L("approx. ", "около ") + tr(a)],
   );
 
-  let lang = "de";
-  try { lang = localStorage.getItem("eg_lang") || "de"; } catch (e) {}
-
-  const D = () => (lang === "ru" ? RU : EN);
+  const D = () => (lang === "ru" ? RU : lang === "en" ? EN : null);
+  // Text aus dem Wörterbuch der gewählten Sprache (fehlt er, dann Englisch)
+  function look(core) {
+    const d = D();
+    if (d) return Object.prototype.hasOwnProperty.call(d, core) ? d[core] : undefined;
+    const x = XD().dict || {};
+    if (Object.prototype.hasOwnProperty.call(x, core)) return x[core];
+    return Object.prototype.hasOwnProperty.call(EN, core) ? EN[core] : undefined;
+  }
   // russische Mehrzahl: 1 ядро, 2–4 ядра, 5+ ядер
   function ruPl(n, one, few, many) { n = Math.abs(+n) % 100; const d = n % 10; if (n > 10 && n < 20) return many; if (d === 1) return one; if (d >= 2 && d <= 4) return few; return many; }
   function tr(s) {
@@ -801,9 +853,9 @@
     const lead = s.match(/^\s*/)[0], trail = s.match(/\s*$/)[0];
     const core = s.trim().replace(/\s+/g, " ");
     if (!core) return s;
-    const d = D();
-    if (Object.prototype.hasOwnProperty.call(d, core)) return lead + d[core] + trail;
-    for (const [re, en, ru] of PAT) if (re.test(core)) { const rep = typeof en === "function" ? en : (lang === "ru" ? ru : en); return lead + core.replace(re, rep) + trail; }  // rep kann Text oder Funktion sein
+    const hit = look(core);
+    if (hit !== undefined) return lead + hit + trail;
+    for (const [re, en, ru] of PAT) if (re.test(core)) { const rep = typeof en === "function" ? en : (lang === "ru" ? ru : lang === "en" ? en : ((XD().pat || {})[en] || en)); return lead + core.replace(re, rep) + trail; }  // rep kann Text oder Funktion sein
     // Mehrzeilige Meldungen: Zeile für Zeile
     if (/\n/.test(s)) {
       const parts = s.split(/(\n+)/).map(p => /\n/.test(p) ? p : (p.trim() ? tr(p) : p));
@@ -837,6 +889,7 @@
   function start() {
     if (lang === "de") return;
     document.documentElement.lang = lang;
+    if (RTL.includes(lang)) { document.documentElement.dir = "rtl"; document.documentElement.classList.add("rtl"); }
     walk(document.body);
     new MutationObserver(ms => {
       for (const m of ms) {
@@ -848,9 +901,10 @@
   }
   window.EG_I18N = {
     get lang() { return lang; },
+    langs: LANGS,
     tr,
     async setLang(l, reload = true) {
-      lang = ["en", "ru"].includes(l) ? l : "de";
+      lang = CODES.includes(l) ? l : "de";
       try { localStorage.setItem("eg_lang", lang); } catch (e) {}
       // erst im Programm speichern, DANN neu laden – sonst setzt der Abgleich beim Laden die alte Sprache zurück
       if (window.easyApp && window.easyApp.setLang) { try { await window.easyApp.setLang(lang); } catch (e) {} }
@@ -861,7 +915,7 @@
       if (window.easyApp && window.easyApp.getLang) {
         try {
           const l = await window.easyApp.getLang();
-          if (l && l !== lang) { lang = l; try { localStorage.setItem("eg_lang", l); } catch (e) {} location.reload(); }
+          if (l && l !== lang && CODES.includes(l)) { lang = l; try { localStorage.setItem("eg_lang", l); } catch (e) {} location.reload(); }
         } catch (e) {}
       }
     },
