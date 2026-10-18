@@ -1002,20 +1002,28 @@ function fail(run, text){
 }
 // ☕ Nach der Warteschlange die Cloud-GPU sofort pausieren (erst wenn alle Ergebnisse abgeholt sind) – je GPU einzeln
 const autoPauseT = {};
+// ☕-Haken gilt nur, wenn man ihn bewusst setzt: nicht dauerhaft gespeichert (übersteht nur das Neuladen, z. B. Sprachwechsel)
+// und schaltet sich selbst wieder aus, sobald die GPUs pausiert wurden.
+const pauseAfter = () => { try{ return sessionStorage.getItem("eg_pauseAfter") === "1"; }catch(e){ return false; } };
+function setPauseAfter(v){ try{ sessionStorage.setItem("eg_pauseAfter", v ? "1" : "0"); }catch(e){} if($("#gpuAuto")) $("#gpuAuto").checked = !!v; }
+store.set("gpuPauseAfter", false);   // alte, dauerhafte Einstellung nicht mehr verwenden
 function gpuBusy(B){ return !!gpuPrep[B] || !!state.submitting[B] || [...state.runs, ...state.queue].some(j => j.B === B) || !!(state.fetching || {})[B]; }
 function maybeAutoPause(B){
-  if(!B || !store.get("gpuPauseAfter", false) || gpuBusy(B)) return;
+  if(!B || !pauseAfter() || gpuBusy(B)) return;
   clearTimeout(autoPauseT[B]);
   autoPauseT[B] = setTimeout(async () => {
-    if(!store.get("gpuPauseAfter", false) || gpuBusy(B)) return;   // inzwischen neuer Auftrag? Dann nicht pausieren
+    if(!pauseAfter() || gpuBusy(B)) return;   // inzwischen neuer Auftrag? Dann nicht pausieren
     const info = await api("/easy/cloud/comfy/info?slot=" + slotOfB(B)).catch(() => null);
     if(!info || !info.id || info.stage !== "RUNNING") return;      // nur eine fertig laufende GPU – nicht beim Einrichten/Starten
     const q = await api(B + "/queue").catch(() => null);            // auch der Server selbst muss leer sein
     if(!q || q.error || (q.queue_running || []).length || (q.queue_pending || []).length) return;
-    if(!store.get("gpuPauseAfter", false) || gpuBusy(B)) return;   // nach dem Warten nochmal prüfen
+    if(!pauseAfter() || gpuBusy(B)) return;   // nach dem Warten nochmal prüfen
     const r = await api("/easy/cloud/rented/pause", { space: info.id });
     if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
-    toast("☕ " + esc((gpu.list.length > 1 ? `GPU ${info.slot}: ` : "") + T("Warteschlange fertig – Cloud-GPU pausiert. Es entstehen keine Kosten mehr.")), "ok", 10000);
+    // Hat keine andere GPU mehr Arbeit, ist der Haken erledigt und geht wieder aus
+    const last = !(gpu.list || []).some(g => g.B !== B && gpuBusy(g.B));
+    if(last) setPauseAfter(false);
+    toast("☕ " + esc((gpu.list.length > 1 ? `GPU ${info.slot}: ` : "") + T("Warteschlange fertig – Cloud-GPU pausiert. Es entstehen keine Kosten mehr.")) + (last ? " " + esc(T("Der Haken ☕ ist jetzt wieder aus.")) : ""), "ok", 10000);
     await loadGpuInfo(); if(state.tab === "video" || state.tab === "image") renderStudio();
   }, 4000);
 }
@@ -1254,7 +1262,7 @@ function renderGpuBar(){
     ${i.needs_update ? `<button class="btn" type="button" id="gpuUpd" ${small}>⬆ Cloud-GPU auf ${esc(i.version)} aktualisieren</button>` : ""}
     ${isOn(i.stage) ? `<button class="btn" type="button" id="gpuPause" ${small}>⏸ Pausieren</button>` : ["PAUSED", "SLEEPING", "STOPPED"].includes(i.stage) ? `<button class="btn" type="button" id="gpuStart" ${small}>▶ Starten</button>` : ""}
     <button class="btn" type="button" id="gpuRef" ${small} title="Aktualisieren">↻</button>
-    <label class="row hint" style="gap:6px;color:var(--text);cursor:pointer" title="Sobald alle Videos in der Warteschlange fertig und abgeholt sind, wird die Cloud-GPU sofort pausiert – ohne die Wartezeit bis zum automatischen Ausschalten."><input type="checkbox" id="gpuAuto" ${store.get("gpuPauseAfter", false) ? "checked" : ""}> <span>☕ Pausieren, wenn die Warteschlange fertig ist</span></label></div>
+    <label class="row hint" style="gap:6px;color:var(--text);cursor:pointer" title="Für „Ich gehe kurz weg“: Sobald alle Videos fertig und abgeholt sind, wird die Cloud-GPU sofort pausiert. Danach ist der Haken wieder aus."><input type="checkbox" id="gpuAuto" ${pauseAfter() ? "checked" : ""}> <span>☕ Pausieren, wenn die Warteschlange fertig ist</span></label></div>
     <div class="row" id="gpuMoney" style="flex-wrap:wrap;gap:8px;margin-top:6px">${gpuMoneyHtml()}</div>`}`;
   el.querySelectorAll("[data-slot]").forEach(b => b.onclick = () => pickGpu(+b.dataset.slot));
   $("#gpuAdd").onclick = () => { gpu.adding = true; renderStudio(); };
@@ -1262,7 +1270,7 @@ function renderGpuBar(){
   bindGpuMoney();
   if($("#gpuPause")) $("#gpuPause").onclick = () => rentedAction(i.id, "pause");
   if($("#gpuStart")) $("#gpuStart").onclick = () => rentedAction(i.id, "start");
-  $("#gpuAuto").onchange = e => { store.set("gpuPauseAfter", e.target.checked); if(e.target.checked) (gpu.list || []).forEach(g => maybeAutoPause(g.B)); };
+  $("#gpuAuto").onchange = e => setPauseAfter(e.target.checked);   // greift, wenn der letzte Auftrag einer GPU fertig ist
   $("#gpuRef").onclick = async () => { gpu.list = null; renderGpuBar(); refreshGpuMoney(true); };
   if($("#gpuUpd")) $("#gpuUpd").onclick = async () => { $("#gpuUpd").disabled = true; const r = await api("/easy/cloud/comfy/update", { slot: i.slot }); if(r.error) toast("❌ " + esc(r.error), "err"); else toast("✅ " + esc(T("Wird aktualisiert – die Cloud-GPU richtet sich in einigen Minuten neu ein.")), "ok"); gpu.list = null; renderGpuBar(); };
 }

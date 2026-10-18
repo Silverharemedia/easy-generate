@@ -729,6 +729,8 @@
     ["🔄 ComfyUI neu starten", "🔄 Restart ComfyUI", "🔄 Перезапустить ComfyUI"],
     ["ComfyUI war abgestürzt und wurde neu gestartet.", "ComfyUI had crashed and was restarted.", "ComfyUI аварийно завершился и был перезапущен."],
     ["Ausblenden", "Hide", "Скрыть"],
+    ["Der Haken ☕ ist jetzt wieder aus.", "The ☕ checkbox is now off again.", "Галочка ☕ снова снята."],
+    ["Für „Ich gehe kurz weg“: Sobald alle Videos fertig und abgeholt sind, wird die Cloud-GPU sofort pausiert. Danach ist der Haken wieder aus.", "For “I'm stepping away”: as soon as all videos are done and fetched, the cloud GPU is paused right away. Then the checkbox switches off again.", "Для «Я ненадолго отойду»: как только все видео готовы и забраны, облачная GPU сразу ставится на паузу. После этого галочка снова снимается."],
     ["Pausiert – kostet jetzt nichts mehr.", "Paused – no more costs now.", "Приостановлено – больше ничего не стоит."],
     ["Kein Guthaben vorhanden – zum Mieten zuerst bei HuggingFace Guthaben aufladen.", "No credit available – top up at HuggingFace before renting.", "Нет баланса – перед арендой пополни баланс на HuggingFace."],
     ["✓ Bei HuggingFace angemeldet.", "✓ Signed in to HuggingFace.", "✓ Вход в HuggingFace выполнен."],
