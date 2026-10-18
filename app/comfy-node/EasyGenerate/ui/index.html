@@ -132,6 +132,15 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
 .ci .ac{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:4px}.ci .ac .btn{font-size:13px;padding:6px 10px}
 .avatar{width:38px;height:38px;border-radius:50%;background:var(--panel2);flex:none;object-fit:cover}
 @media (max-width:1180px){.mon{display:none}}
+#queueBox{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+#queueBox h4{margin:0 0 8px;font-size:13px;color:var(--muted);font-weight:600}
+.qitem{display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);margin-bottom:6px;font-size:13px}
+.qitem.run{border-color:var(--acc)}
+.qitem .qn{width:20px;text-align:center;color:var(--muted);flex:none}
+.qitem .qt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qitem .qs{flex:none;color:var(--muted);font-size:12px}
+.qitem .qx{flex:none;background:none;border:0;color:var(--muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px}
+.qitem .qx:hover{color:#ffb3bb;background:#2c1418}
 </style>
 </head>
 <body>
@@ -249,6 +258,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
             <div class="bar"><div id="bar"></div></div>
             <div class="actions" style="margin-top:10px"><button class="btn danger" id="stop">Abbrechen</button></div>
           </div>
+          <div id="queueBox" class="hidden"></div>
           <div id="out"></div>
           <div class="actions hidden" id="resActions"><button class="btn pri hidden" id="showDir" type="button">📂 Im Ordner zeigen</button><a class="btn" id="dl" download>Herunterladen</a><button class="btn" id="again">Nochmal (neuer Seed)</button></div>
           <p class="hint" id="keptHint" style="margin:6px 0 0"></p>
@@ -398,7 +408,8 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const host = window.easyApp || null;          // vorhanden, wenn im Easy-Generate-Programm geöffnet
-const cid = (crypto.randomUUID ? crypto.randomUUID() : "eg" + Math.random().toString(36).slice(2));
+// gleiche Kennung auch nach dem Neuladen (z. B. Sprachwechsel), damit der Fortschritt laufender Aufträge weiter ankommt
+const cid = (() => { let c = null; try{ c = sessionStorage.getItem("eg_cid"); }catch(e){} if(!c){ c = crypto.randomUUID ? crypto.randomUUID() : "eg" + Math.random().toString(36).slice(2); try{ sessionStorage.setItem("eg_cid", c); }catch(e){} } return c; })();
 const store = {
   get(k, d){ try{ const v = localStorage.getItem("eg_" + k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },
   set(k, v){ try{ localStorage.setItem("eg_" + k, JSON.stringify(v)); }catch(e){} }
@@ -681,8 +692,8 @@ function renderStudio(){
 function updateGo(){
   const info = curInfo();
   if($("#cGo")){ $("#cGo").disabled = !!state.run || !!cloud.run || !online; }
-  $("#go").disabled = !info || !!state.run || !!(typeof cloud !== "undefined" && cloud.run) || !online;
-  $("#goHint").textContent = !online ? "ComfyUI läuft nicht." : state.run ? "Es wird gerade etwas erstellt …" : (info && !info.pos ? "Dieses Werkzeug braucht keinen Text – einfach die Eingabe auswählen und starten." : "");
+  $("#go").disabled = !info || gpuPrep.active || !!(typeof cloud !== "undefined" && cloud.run) || !online;
+  $("#goHint").textContent = !online ? "ComfyUI läuft nicht." : state.run ? "Es wird gerade etwas erstellt – weitere Aufträge kommen in die Warteschlange." : (info && !info.pos ? "Dieses Werkzeug braucht keinen Text – einfach die Eingabe auswählen und starten." : "");
 }
 $("#toolSel").onchange = e => { state.active[state.kind] = e.target.value; api("/easy/config", { active: state.active }); renderStudio(); };
 $("#moreModels").onclick = () => { state.mKind = state.kind; state.instTarget = state.compute[state.kind] === "gpu" ? "gpu" : "local"; showTab("models"); };
@@ -754,7 +765,8 @@ async function generate(){
   const missingImg = info.images.find(im => !state.images[im.id]);
   if(missingImg){ showMsg("warn", `Bitte zuerst „${missingImg.title}“ auswählen.`); return; }
 
-  $("#out").innerHTML = ""; $("#resActions").classList.add("hidden");
+  const queued = !!state.run;
+  if(!queued){ $("#out").innerHTML = ""; $("#resActions").classList.add("hidden"); }
   let seed;
   if($("#seedRand").checked){ seed = Math.floor(Math.random() * 2 ** 48); $("#seed").value = seed; }
   else seed = Math.max(0, parseInt($("#seed").value || "0", 10));
@@ -773,10 +785,14 @@ async function generate(){
       for(const ne of Object.values(j.node_errors || {})) for(const e of ne.errors || []) lines.push(`${ne.class_type}: ${e.message}${e.details ? " – " + e.details : ""}`);
       showMsg("err", friendly(lines.join("\n"))); return;
     }
-    state.run = { id: j.prompt_id, key, kind: k, B, rpSeq, start: Date.now(), total: Object.keys(wf).length, done: new Set(), step: 0, max: 0, finished: false, wf, units: workUnits(), est: estimate() };
-    $("#progBox").classList.remove("hidden"); $("#progTxt").textContent = "In der Warteschlange …"; $("#bar").style.width = "2%";
-    tick(); updateGo();
-  }catch(e){ $("#progBox").classList.add("hidden"); updateGo(); showMsg("err", friendly(gpuErr(String(e.message || e)))); }
+    const tool = state.installed.find(t => t.name === key);
+    const job = { id: j.prompt_id, key, kind: k, B, rpSeq, start: Date.now(), sub: Date.now(), total: Object.keys(wf).length, done: new Set(), step: 0, max: 0, finished: false, wf: slimWf(wf), units: workUnits(), est: estimate(), prompt: $("#prompt").value.trim(), title: tool ? tool.title : key };
+    if(state.run){
+      state.queue.push(job); saveJobs(); renderQueue();
+      toast("📋 " + esc(T("In die Warteschlange gestellt")) + ` (${state.queue.length + 1})`, "ok", 3000);
+    } else startJob(job);
+    updateGo();
+  }catch(e){ if(!state.run) $("#progBox").classList.add("hidden"); updateGo(); renderQueue(); if(queued) toast("❌ " + esc(T(friendly(gpuErr(String(e.message || e))))), "err", 8000); else showMsg("err", friendly(gpuErr(String(e.message || e)))); }
 }
 function tick(){
   const run = state.run; if(!run) return;
@@ -784,7 +800,8 @@ function tick(){
   $("#etaRun").textContent = runEtaText(run);
   run.timer = setTimeout(tick, 1000);
   if(run.B){ remoteProgress(run); return; }
-  if(!ws || ws.readyState !== 1){ if(!run.poll || Date.now() - run.poll > 3000){ run.poll = Date.now(); pollDone(); } }
+  const every = !ws || ws.readyState !== 1 ? 3000 : 10000;   // auch bei Live-Verbindung ab und zu nachsehen (Auftrag kann schon fertig sein)
+  if(!run.poll || Date.now() - run.poll > every){ run.poll = Date.now(); pollDone(); }
 }
 function updateBar(){
   const run = state.run; if(!run) return;
@@ -818,7 +835,60 @@ async function pollDone(){
     else if(h && h.status && h.status.status_str === "error") fail("Fehler beim Erstellen. Details stehen im ComfyUI-Protokoll.");
   }catch(e){}
 }
-function endRun(){ const run = state.run; if(run) clearTimeout(run.timer); if(run && run.B) closeRemoteWS(); state.run = null; $("#progBox").classList.add("hidden"); updateGo(); }
+function endRun(){
+  const run = state.run; if(run) clearTimeout(run.timer); if(run && run.B) closeRemoteWS(); state.run = null; $("#progBox").classList.add("hidden");
+  if(state.queue.length) startJob(state.queue.shift());   // nächsten Auftrag aus der Warteschlange verfolgen
+  saveJobs(); renderQueue(); updateGo();
+}
+/* ---------- Warteschlange (übersteht auch Neuladen, z. B. beim Sprachwechsel) ---------- */
+state.queue = [];
+function slimWf(wf){ const o = {}; for(const [id, n] of Object.entries(wf || {})) o[id] = { class_type: n.class_type, _meta: n._meta }; return o; }
+function startJob(job, keepStart){
+  state.run = job; if(!keepStart) job.start = Date.now(); job.done = job.done instanceof Set ? job.done : new Set(); job.step = 0; job.max = 0; job.finished = false; job.rpSeq = job.rpSeq ?? null;
+  if(job.B) openRemoteWS();
+  $("#progBox").classList.remove("hidden"); $("#progTxt").textContent = "In der Warteschlange …"; $("#bar").style.width = "2%";
+  saveJobs(); renderQueue(); tick();
+}
+function saveJobs(){
+  const pick = j => ({ id: j.id, key: j.key, kind: j.kind, B: j.B, sub: j.sub, start: j.start, total: j.total, wf: j.wf, units: j.units, est: j.est, prompt: j.prompt, title: j.title });
+  store.set("jobs", [state.run, ...state.queue].filter(Boolean).map(pick));
+}
+function renderQueue(){
+  const el = $("#queueBox"); if(!el) return;
+  const all = [state.run, ...state.queue].filter(Boolean);
+  if(all.length < 2 && !(gpuPrep.active && state.run)){ el.classList.add("hidden"); el.innerHTML = ""; return; }
+  el.classList.remove("hidden");
+  const where = j => j.B ? "🚀" : "🖥️";
+  const rows = all.map((j, i) => `<div class="qitem ${i === 0 ? "run" : ""}" title="${esc(j.prompt || "")}"><span class="qn">${i === 0 ? "▶" : i + 1}</span><span class="qt">${where(j)} <b>${esc(j.title || j.key)}</b> · ${esc((j.prompt || "").slice(0, 80) || "–")}</span><span class="qs">${i === 0 ? T("läuft") : T("wartet")}</span>${i > 0 ? `<button class="qx" type="button" data-q="${esc(j.id)}" title="${esc(T("Aus der Warteschlange entfernen"))}">✕</button>` : ""}</div>`);
+  if(gpuPrep.active && state.run) rows.push(`<div class="qitem"><span class="qn">…</span><span class="qt">🚀 ${esc(T(gpuPrep.txt || "Bereite vor …"))}</span></div>`);
+  el.innerHTML = `<h4>📋 ${esc(T("Warteschlange"))} (${all.length})</h4>` + rows.join("");
+  el.querySelectorAll("[data-q]").forEach(b => b.onclick = () => removeQueued(b.dataset.q));
+}
+async function removeQueued(id){
+  const j = state.queue.find(x => x.id === id); if(!j) return;
+  state.queue = state.queue.filter(x => x !== j); saveJobs(); renderQueue();
+  try{ await api((j.B || "") + "/queue", { delete: [id] }); }catch(e){}
+}
+// Nach dem Neuladen: Aufträge wieder aufnehmen, die der Server noch kennt
+async function restoreJobs(){
+  const saved = store.get("jobs", []);
+  if(!Array.isArray(saved) || !saved.length) return;
+  const keep = [];
+  for(const j of saved){
+    try{
+      const q = await api((j.B || "") + "/queue");
+      const has = arr => (arr || []).some(e => e && e[1] === j.id);
+      if(q && !q.error && (has(q.queue_running) || has(q.queue_pending))){ keep.push(j); continue; }
+      const h = await api((j.B || "") + "/history/" + j.id);
+      if(h && h[j.id]) keep.push(j);          // schon fertig – Ergebnis wird gleich abgeholt
+      else if(!q || q.error) keep.push(j);    // Server gerade nicht erreichbar – nicht verwerfen
+    }catch(e){ keep.push(j); }
+  }
+  if(!keep.length){ store.set("jobs", []); return; }
+  state.queue = keep.slice(1).map(j => Object.assign(j, { done: new Set(), rpSeq: null }));
+  startJob(Object.assign(keep[0], { rpSeq: null }), true);
+  updateGo();
+}
 function fail(text){ endRun(); showMsg(text === "Abgebrochen." ? "warn" : "err", text); }
 async function finish(){
   const run = state.run; if(!run || run.finished) return;
@@ -836,11 +906,11 @@ async function finish(){
   const tool = state.installed.find(t => t.name === run.key);
   if(run.B){
     showMsg("ok", "Fertig – hole das Ergebnis von der Cloud-GPU …");
-    const fr = await api("/easy/cloud/comfy/fetch", { files, model: tool ? tool.title : run.key, kind: run.kind, prompt: $("#prompt").value.trim() });
+    const fr = await api("/easy/cloud/comfy/fetch", { files, model: tool ? tool.title : run.key, kind: run.kind, prompt: run.prompt ?? $("#prompt").value.trim() });
     if(!fr.files || !fr.files.length){ showMsg("err", "Das Ergebnis konnte nicht von der Cloud-GPU geholt werden."); return; }
-    files = fr.files; closeRemoteWS();
+    files = fr.files;
     setTimeout(() => refreshGpuMoney(true), 5000);   // Guthaben nach dem Erstellen auffrischen
-  } else files = await toGallery(files, tool ? tool.title : run.key, run.kind, $("#prompt").value.trim());
+  } else files = await toGallery(files, tool ? tool.title : run.key, run.kind, run.prompt ?? $("#prompt").value.trim());
   showResult(files);
   showMsg("ok", `Fertig in ${fmtTime(secs)} Min.`);
 }
@@ -943,15 +1013,19 @@ function gpuErr(t){
   if(/REMOTE_DOWN/.test(t)) return "Die Cloud-GPU antwortet nicht – sie ist aus oder startet gerade.";
   return t;
 }
-const gpuPrep = { active: false, cancel: false };
+const gpuPrep = { active: false, cancel: false, txt: "" };
 // Vor dem Erstellen: Cloud-GPU starten (falls aus), warten bis bereit, fehlende Modelle auf dem Server laden.
 async function gpuPrepare(name){
-  gpuPrep.active = true; gpuPrep.cancel = false;
-  const box = $("#progBox"), txt = $("#progTxt"), bar = $("#bar");
-  box.classList.remove("hidden"); bar.style.width = "2%"; $("#etaRun").textContent = ""; updateGo();
+  gpuPrep.active = true; gpuPrep.cancel = false; gpuPrep.txt = "";
+  const busy = !!state.run;   // läuft schon etwas? Dann nur in der Warteschlange anzeigen, nicht den Fortschritt überschreiben
+  const box = $("#progBox"), realTxt = $("#progTxt"), realBar = $("#bar");
+  const txt = { set textContent(t){ if(busy){ gpuPrep.txt = t; renderQueue(); } else realTxt.textContent = t; } };
+  const bar = { style: { set width(w){ if(!busy) realBar.style.width = w; } } };
+  if(!busy){ box.classList.remove("hidden"); realBar.style.width = "2%"; $("#etaRun").textContent = ""; }
+  updateGo(); renderQueue();
   const t0 = Date.now();
-  const timer = setInterval(() => { $("#timeTxt").textContent = fmtTime((Date.now() - t0) / 1000); }, 1000);
-  const done = ok => { clearInterval(timer); gpuPrep.active = false; if(!ok){ box.classList.add("hidden"); updateGo(); } return ok; };
+  const timer = setInterval(() => { if(!busy) $("#timeTxt").textContent = fmtTime((Date.now() - t0) / 1000); }, 1000);
+  const done = ok => { clearInterval(timer); gpuPrep.active = false; gpuPrep.txt = ""; if(!ok && !busy) box.classList.add("hidden"); updateGo(); renderQueue(); return ok; };
   try{
     let info = await loadGpuInfo();
     if(!info || !info.exists){ showMsg("warn", "Es ist noch keine Cloud-GPU eingerichtet."); return done(false); }
@@ -2592,6 +2666,7 @@ function showUpdate(v){
   let t = store.get("tab", "video");
   if(!["video", "image", "cloud", "gal", "models", "set"].includes(t)) t = "video";
   showTab(t);
+  restoreJobs();
   watchDownload();
   loadCatalog(true);
   gallerySetup(false);
