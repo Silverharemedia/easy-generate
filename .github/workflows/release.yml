@@ -22,7 +22,18 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
-      - name: Build and publish installer
-        run: npx electron-builder --win nsis --x64 --publish always
+      - name: Build installer
+        run: npx electron-builder --win nsis --x64 --publish never
+      - name: Publish release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          TAG="v$VER"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Easy Generate $VER" --notes "Easy Generate $VER – Setup herunterladen und ausführen. Bestehende Installationen aktualisieren sich automatisch."
+          for i in 1 2 3; do
+            gh release upload "$TAG" "dist/Easy-Generate-Setup-$VER.exe" "dist/Easy-Generate-Setup-$VER.exe.blockmap" "dist/latest.yml" --clobber && break
+            echo "Upload fehlgeschlagen, neuer Versuch in 15 s"; sleep 15
+          done
+          gh release view "$TAG" --json assets --jq '.assets[].name'
