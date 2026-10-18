@@ -680,6 +680,8 @@
     ["Das Ergebnis konnte nicht von der Cloud-GPU geholt werden.", "The result could not be fetched from the cloud GPU.", "Не удалось забрать результат с облачной GPU."],
     ["Installieren:", "Install:", "Установить:"], ["🖥️ Für meinen PC", "🖥️ For my PC", "🖥️ Для моего ПК"], ["lädt die Dateien herunter", "downloads the files", "скачивает файлы"],
     ["🚀 Nur für die Cloud-GPU", "🚀 Only for the cloud GPU", "🚀 Только для облачной GPU"], ["ohne Download auf den PC", "no download to your PC", "без загрузки на ПК"],
+    ["Die Cloud-GPU hat den Auftrag nicht mehr (vermutlich neu gestartet oder pausiert). Bitte nochmal erstellen.", "The cloud GPU no longer has the job (probably restarted or paused). Please create again.", "У облачной GPU больше нет задания (вероятно, перезапуск или пауза). Создай заново."],
+    ["☕ Nach dem ersten Einrichten automatisch pausieren (dann keine Kosten, bis du erstellst)", "☕ Pause automatically after the first setup (no costs until you create)", "☕ Приостановить после первой настройки (без расходов, пока не создашь)"],
     ["Kein Guthaben vorhanden – zum Mieten zuerst bei HuggingFace Guthaben aufladen.", "No credit available – top up at HuggingFace before renting.", "Нет баланса – перед арендой пополни баланс на HuggingFace."],
     ["✓ Bei HuggingFace angemeldet.", "✓ Signed in to HuggingFace.", "✓ Вход в HuggingFace выполнен."],
     ["Auf deiner Abrechnungsseite wurde kein Prepaid-Guthaben gefunden – vermutlich wurde noch nichts aufgeladen.", "No prepaid credit was found on your billing page – probably nothing has been topped up yet.", "На странице оплаты не найден предоплаченный баланс – вероятно, ещё ничего не пополнено."],

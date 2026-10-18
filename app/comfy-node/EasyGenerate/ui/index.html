@@ -818,7 +818,7 @@ async function pollDone(){
     else if(h && h.status && h.status.status_str === "error") fail("Fehler beim Erstellen. Details stehen im ComfyUI-Protokoll.");
   }catch(e){}
 }
-function endRun(){ const run = state.run; if(run) clearTimeout(run.timer); state.run = null; $("#progBox").classList.add("hidden"); updateGo(); }
+function endRun(){ const run = state.run; if(run) clearTimeout(run.timer); if(run && run.B) closeRemoteWS(); state.run = null; $("#progBox").classList.add("hidden"); updateGo(); }
 function fail(text){ endRun(); showMsg(text === "Abgebrochen." ? "warn" : "err", text); }
 async function finish(){
   const run = state.run; if(!run || run.finished) return;
@@ -921,6 +921,18 @@ async function remoteProgress(run){
   }catch(e){}
   finally{ run.rpBusy = false; }
   if(state.run === run && (!run.poll || Date.now() - run.poll > 6000)){ run.poll = Date.now(); pollDone(); }
+  // Hat die Cloud-GPU den Auftrag verloren (z. B. neu gestartet)? Dann nicht ewig warten.
+  if(state.run === run && Date.now() - (run.qAt || run.start) > 20000){
+    run.qAt = Date.now();
+    try{
+      const q = await api(run.B + "/queue");
+      const has = arr => (arr || []).some(e => e && e[1] === run.id);
+      if(q && !q.error && !has(q.queue_running) && !has(q.queue_pending)){
+        const h = await api(run.B + "/history/" + run.id);
+        if(!h || !h[run.id]){ run.lost = (run.lost || 0) + 1; if(run.lost >= 2 && state.run === run) fail("Die Cloud-GPU hat den Auftrag nicht mehr (vermutlich neu gestartet oder pausiert). Bitte nochmal erstellen."); }
+      } else run.lost = 0;
+    }catch(e){}
+  }
 }
 function closeRemoteWS(){ try{ if(rws) rws.close(); }catch(e){} rws = null; }
 const gpu = { info: null };
@@ -1015,6 +1027,7 @@ async function gpuSetupCard(){
     <select class="sel" id="gsHw">${hws.map(h => `<option value="${esc(h.name)}">${esc(h.pretty)} · ${esc(h.vram || "")} · ${usd(h.per_hour)}/Std.</option>`).join("")}</select>
     <label class="l">Schaltet sich automatisch aus nach</label>
     <select class="sel" id="gsSleep"><option value="900">15 Min. ohne Nutzung (empfohlen)</option><option value="1800">30 Min.</option><option value="3600">1 Std.</option></select>
+    <label class="row hint" style="gap:8px;margin-top:10px;color:var(--text)"><input type="checkbox" id="gsPwr"> <span>☕ Nach dem ersten Einrichten automatisch pausieren (dann keine Kosten, bis du erstellst)</span></label>
     <p class="hint" style="margin:10px 0 0"><span>Beim ersten Mal wird der Server ca. 10 Minuten eingerichtet.</span> <span>Bei jedem Start lädt er die Modelle der gewählten Vorlage aus dem Netz (im Rechenzentrum sehr schnell).</span> <span>Für gesperrte Modelle bekommt der private Server deinen Haupt-Schlüssel als geheime Einstellung – dort läuft nur ComfyUI und Easy Generate, kein fremder Code.</span></p>
     <div class="actions" style="margin-top:12px"><button class="btn pri" type="button" id="gsGo" ${okMain && okSpace ? "" : "disabled"}>🚀 Cloud-GPU einrichten</button></div>
     <div id="gsMsg2" style="margin-top:8px"></div>`;
@@ -1024,7 +1037,7 @@ async function gpuSetupCard(){
     const h = hws.find(x => x.name === $("#gsHw").value);
     if(!confirm(T(`Cloud-GPU auf ${h ? h.pretty : $("#gsHw").value} einrichten?`) + "\n\n" + T(`Kosten: ${h ? usd(h.per_hour) : "?"} pro Stunde, solange der Space läuft. Ohne Nutzung schaltet er sich automatisch aus.`))) return;
     $("#gsGo").disabled = true; $("#gsMsg2").innerHTML = `<span class="hint">Richte ein …</span>`;
-    const r = await api("/easy/cloud/comfy/create", { hardware: $("#gsHw").value, sleep: +$("#gsSleep").value });
+    const r = await api("/easy/cloud/comfy/create", { hardware: $("#gsHw").value, sleep: +$("#gsSleep").value, pause_when_ready: $("#gsPwr").checked });
     if(r.error){ $("#gsGo").disabled = false; $("#gsMsg2").innerHTML = `<div class="msg err">${esc(cloudErr(r.error))}</div>`; return; }
     gpu.info = null; await loadGpuInfo();
     toast("✅ " + esc(T("Die Cloud-GPU wird eingerichtet – das dauert beim ersten Mal ca. 10 Minuten.")), "ok", 8000);

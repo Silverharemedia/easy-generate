@@ -19,8 +19,8 @@ import aiohttp
 from aiohttp import web
 
 from . import DATA, HERE, VERSION, routes
-from .cloud import (HF, CACHE, HFError, _rented_entry, cstate, ensure_watch, hf, json_body_required, save_cstate,
-                    space_token, token)
+from .cloud import (HF, CACHE, HFError, _rented_entry, _resume_watches, cstate, ensure_watch, hf, json_body_required,
+                    save_cstate, space_token, token)
 
 SPACE_NAME = "eg-comfyui"
 
@@ -261,6 +261,8 @@ async def remote_proxy(request):
     tail = request.match_info["tail"]
     if tail == "ws":
         return await remote_ws(request)
+    if tail in ("prompt", "easy/models/download", "upload/image"):
+        ACT["last"] = time.time()          # echte Nutzung -> Leerlauf-Uhr zuruecksetzen
     host = await target()
     headers = auth_headers()
     if request.headers.get("Content-Type"):
@@ -320,3 +322,74 @@ async def comfy_fetch(request):
         if ref:
             refs.append(dict(ref, name=os.path.basename(t)))
     return web.json_response({"files": refs})
+
+
+# ------------------------------------------------------------------ Leerlauf-Waechter
+# Unabhaengig von HuggingFace: Laeuft die Cloud-GPU laenger als die eingestellte Zeit ohne Auftrag,
+# pausiert Easy Generate sie selbst. (Wird regelmaessig von der Oberflaeche angestossen.)
+ACT = {"last": time.time(), "checked": 0, "busy": False}
+
+
+async def _idle_check():
+    x = comfy_entry()
+    if not x or not token():
+        return
+    try:
+        rt = await hf("GET", f"/api/spaces/{x['id']}/runtime", timeout=15)
+    except Exception:
+        return
+    if rt.get("stage") != "RUNNING":
+        ACT["last"] = time.time()          # Uhr laeuft erst, wenn sie wirklich bereit ist
+        return
+    limit = int(x.get("sleep") or 900)
+    if time.time() - ACT["last"] < limit:
+        return
+    # Laeuft gerade etwas? Dann nicht pausieren.
+    try:
+        host = await target()
+        headers = auth_headers()
+        async with session().get(host + "/queue", headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
+            q = await r.json() if r.status == 200 else {}
+        if q.get("queue_running") or q.get("queue_pending"):
+            ACT["last"] = time.time()
+            return
+        async with session().get(host + "/easy/models/status", headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
+            ms = await r.json() if r.status == 200 else {}
+        if ms.get("running"):
+            ACT["last"] = time.time()
+            return
+    except Exception:
+        pass
+    try:
+        await hf("POST", f"/api/spaces/{x['id']}/pause")
+        st = cstate()
+        e = _rented_entry(st, x["id"])
+        if e:
+            e["auto_paused_at"] = time.time()
+            save_cstate(st)
+        print(f"[Easy Generate] Cloud-GPU {x['id']} war {limit // 60} Min. ohne Auftrag und wurde pausiert.")
+    except Exception as err:
+        print("[Easy Generate] Cloud-GPU konnte nicht pausiert werden:", err)
+
+
+async def _tick():
+    try:
+        _resume_watches()
+        await _idle_check()
+    finally:
+        ACT["busy"] = False
+
+
+def tick():
+    """Hoechstens einmal pro Minute: Bereit-Waechter fortsetzen und Leerlauf pruefen."""
+    if ACT["busy"] or time.time() - ACT["checked"] < 60:
+        return
+    ACT["checked"] = time.time()
+    ACT["busy"] = True
+    asyncio.ensure_future(_tick())
+
+
+@routes.post("/easy/cloud/comfy/touch")
+async def comfy_touch(request):
+    ACT["last"] = time.time()
+    return web.json_response({"ok": True})

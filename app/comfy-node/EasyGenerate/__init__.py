@@ -15,7 +15,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.6.1"
+VERSION = "1.6.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -1088,6 +1088,11 @@ async def easy_specs(request):
 async def easy_sysinfo(request):
     ensure_gpu_reader()
     ensure_temp_reader()
+    try:
+        from . import remote as _remote
+        _remote.tick()
+    except Exception:
+        pass
     td = TEMP_STAT["data"] or {}
     out = {"cpu_temp": td.get("cpu"), "cpu_temp_src": td.get("cpu_src"), "gpu_temp": td.get("gpu"), "gpu_fan": td.get("fan"), "cpu": None, "ram_used": None, "ram_total": None, "gpu": GPU_STAT["util"], "vram_used": None, "vram_total": None, "gpu_name": ""}
     try:

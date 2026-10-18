@@ -956,6 +956,11 @@ def _resume_watches():
 
 async def _wake(sid):
     try:
+        from . import remote as _r
+        _r.ACT["last"] = time.time()
+    except Exception:
+        pass
+    try:
         rt = await hf("GET", f"/api/spaces/{sid}/runtime")
         if rt.get("stage") in ("PAUSED", "SLEEPING", "STOPPED"):
             await hf("POST", f"/api/spaces/{sid}/restart")
@@ -1106,6 +1111,7 @@ async def cloud_rented_action(request):
         if action == "pause":
             await hf("POST", f"/api/spaces/{sid}/pause")
         elif action == "start":
+            await _wake(sid)
             await hf("POST", f"/api/spaces/{sid}/restart")
         elif action == "hardware":
             body = {"flavor": str(data.get("hardware"))}
