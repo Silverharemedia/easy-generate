@@ -1098,7 +1098,8 @@ async function renderCloud(fresh){
     t => { cloud.tab = t; store.set("clTab", t); renderCloud(); });
   checkSetup();
   if(!cloud.acct || fresh){ if(!cloud.acct) renderAccount(); await loadAccount(true); if(state.tab !== "cloud") return; }
-  if(!cloud.hw) api("/easy/cloud/hardware").then(j => { cloud.hw = j.items || []; if(state.tab === "cloud"){ renderReach(); if(cloud.tab === "rent") renderRent(); } });
+  if(fresh){ cloud.models = {}; cloud.spaces = {}; }   // beim Öffnen immer die aktuellen Listen holen
+  if(!cloud.hw || fresh) api("/easy/cloud/hardware").then(j => { cloud.hw = j.items || []; if(state.tab === "cloud"){ renderReach(); if(cloud.tab === "rent") renderRent(); } });
   renderAccount(); renderReach();
   if(cloud.tab === "free") renderFree();
   else if(cloud.tab === "pay") renderPay();

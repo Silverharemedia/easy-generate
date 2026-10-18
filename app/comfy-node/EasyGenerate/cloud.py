@@ -389,7 +389,7 @@ async def _models(task):
 async def cloud_models(request):
     task = TASKS.get(request.query.get("task", "t2v"), "text-to-video")
     try:
-        items = await cached("models:" + task, 6 * 3600, lambda: _models(task))
+        items = await cached("models:" + task, 3600, lambda: _models(task))
         costs = cstate().get("costs", {})
         for it in items:
             c = costs.get(it["id"])
@@ -466,7 +466,7 @@ async def cloud_spaces(request):
             items = [x for x in await _search_spaces(q, kind) if x["zero"] or x["stage"] == "RUNNING"]
             items.sort(key=lambda x: (0 if x["zero"] else 1, -x["likes"]))
         else:
-            items = await cached("spaces:" + kind, 3600, lambda: _spaces(kind))
+            items = await cached("spaces:" + kind, 1800, lambda: _spaces(kind))
         return web.json_response({"items": items})
     except Exception as e:
         return web.json_response({"items": [], "error": str(e)})
@@ -708,7 +708,7 @@ async def _hardware():
 @routes.get("/easy/cloud/hardware")
 async def cloud_hardware(request):
     try:
-        return web.json_response({"items": await cached("hardware", 24 * 3600, _hardware)})
+        return web.json_response({"items": await cached("hardware", 3600, _hardware)})
     except Exception as e:
         return web.json_response({"items": [], "error": str(e)})
 
@@ -772,7 +772,7 @@ async def _rented_status():
     st = cstate()
     hwmap = {}
     try:
-        hwmap = {h["name"]: h for h in await cached("hardware", 24 * 3600, _hardware)}
+        hwmap = {h["name"]: h for h in await cached("hardware", 3600, _hardware)}
     except Exception:
         pass
     out = []
