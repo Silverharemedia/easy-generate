@@ -15,7 +15,9 @@ Updates installiert Easy Generate selbst (Einstellungen → „Nach Updates such
 - 🎬 **Video** und 🖼️ **Bild** – Prompt eingeben, Format/Größe/Länge wählen, fertig. Start- und Referenzbilder per Drag & Drop.
 - 📦 **Modelle** – alle lokalen ComfyUI-Vorlagen (LTX, Wan, Flux, Qwen-Image, …) mit 1-Klick-Installation, Fortschrittsanzeige, Fortsetzen nach Abbruch und Entfernen.
 - ✨ **KI-Prompt-Helfer** – lokal über Ollama oder mit Claude.
-- 📁 **Galerie** aller Ergebnisse.
+- 📁 **Galerie** aller Ergebnisse, nach Modell sortiert (Speicherort frei wählbar oder ganz abschaltbar).
+- ☁️ **Cloud** über Hugging Face – kostenlose ZeroGPU-Spaces, Bezahlung pro Video oder eine eigene gemietete Cloud-GPU mit ComfyUI. Dein Hugging-Face-Schlüssel bleibt auf deinem PC und wird nur an Hugging Face selbst gesendet.
+- 🌡️ **Monitor** mit Auslastung und Temperaturen von CPU und GPU.
 
 ## Aufbau
 
@@ -23,3 +25,7 @@ Updates installiert Easy Generate selbst (Einstellungen → „Nach Updates such
 - `app/comfy-node/EasyGenerate/` – die Erweiterung für ComfyUI mit der eigentlichen Oberfläche (`/easy`).
 
 Eine neue Version entsteht, indem die Versionsnummer in `app/package.json` erhöht und ein Tag `vX.Y.Z` gepusht wird – GitHub baut dann das Setup und veröffentlicht es als Update.
+
+## Lizenz
+
+Easy Generate ist frei und offen: [MIT-Lizenz](LICENSE). Jeder darf es kostenlos nutzen, weitergeben und verändern.
