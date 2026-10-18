@@ -644,6 +644,8 @@
     ["Bilder pro Sekunde", "Frames per second", "Кадров в секунду"], ["Mehr = flüssiger, aber mehr Rechenarbeit.", "More = smoother, but more computing.", "Больше – плавнее, но больше вычислений."],
     ["Anzahl Einzelbilder", "Number of frames", "Количество кадров"], ["Mehr Bilder = längeres Video, dauert länger.", "More frames = longer video, takes longer.", "Больше кадров – длиннее видео, дольше."],
     ["Breite", "Width", "Ширина"], ["Höhe", "Height", "Высота"], ["In Pixeln.", "In pixels.", "В пикселях."],
+    ["Die GPU startet – das dauert ein paar Minuten. Im Studio siehst du den Fortschritt.", "The GPU is starting – this takes a few minutes. You can see the progress in the studio.", "GPU запускается – это займёт несколько минут. Прогресс виден в студии."],
+    ["↻ Aktualisieren", "↻ Refresh", "↻ Обновить"],
     ["Kein Guthaben vorhanden – zum Mieten zuerst bei HuggingFace Guthaben aufladen.", "No credit available – top up at HuggingFace before renting.", "Нет баланса – перед арендой пополни баланс на HuggingFace."],
     ["✓ Bei HuggingFace angemeldet.", "✓ Signed in to HuggingFace.", "✓ Вход в HuggingFace выполнен."],
     ["Auf deiner Abrechnungsseite wurde kein Prepaid-Guthaben gefunden – vermutlich wurde noch nichts aufgeladen.", "No prepaid credit was found on your billing page – probably nothing has been topped up yet.", "На странице оплаты не найден предоплаченный баланс – вероятно, ещё ничего не пополнено."],
