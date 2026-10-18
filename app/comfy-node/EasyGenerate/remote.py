@@ -23,6 +23,7 @@ from .cloud import (HF, CACHE, HFError, _rented_entry, _resume_watches, cstate, 
                     save_cstate, space_token, token)
 
 SPACE_NAME = "eg-comfyui"
+MAX_SLOTS = 20
 # Nur erhoehen, wenn sich etwas aendert, das auf der Cloud-GPU selbst laufen muss
 # (dann wird dort ein Update angeboten). 2 = Fortschritt per /easy/progress.
 REMOTE_API = 2
@@ -85,7 +86,7 @@ def req_slot(request, data=None):
     if v is None:
         v = request.query.get("slot")
     try:
-        return max(1, min(20, int(v or 1)))
+        return max(1, min(MAX_SLOTS, int(v or 1)))
     except Exception:
         return 1
 
@@ -138,7 +139,11 @@ async def comfy_create(request):
     if not token():
         return web.json_response({"error": "AUTH"}, status=400)
     used = {slot_of(x) for x in comfy_entries()}
-    slot = int(data.get("slot") or 0) or next(n for n in range(1, 50) if n not in used)
+    slot = int(data.get("slot") or 0) or next((n for n in range(1, MAX_SLOTS + 1) if n not in used), MAX_SLOTS + 1)
+    if slot in used:
+        return web.json_response({"error": f"GPU {slot} gibt es schon."}, status=400)
+    if slot > MAX_SLOTS:
+        return web.json_response({"error": f"Hoechstens {MAX_SLOTS} Cloud-GPUs."}, status=400)
     name = space_name(slot)
     try:
         me = await hf("GET", "/api/whoami-v2")
@@ -316,8 +321,7 @@ async def remote_proxy(request):
     slot = int(request.match_info.get("slot") or 1)
     if tail == "ws":
         return await remote_ws(request, slot)
-    if tail in ("prompt", "easy/models/download", "upload/image"):
-        act(slot)["last"] = time.time()    # echte Nutzung -> Leerlauf-Uhr zuruecksetzen
+    act(slot)["last"] = time.time()        # jede Anfrage (auch Fortschritt/Ergebnis abholen) = Nutzung
     host = await target(slot)
     headers = auth_headers()
     if request.headers.get("Content-Type"):
@@ -352,7 +356,9 @@ async def comfy_fetch(request):
     """Ergebnisse von der Cloud-GPU auf den PC holen und in die Galerie einsortieren."""
     from . import gallery
     data = await request.json()
-    host = await target(req_slot(request, data))
+    slot = req_slot(request, data)
+    act(slot)["last"] = time.time()
+    host = await target(slot)
     headers = auth_headers()
     outdir = os.path.join(gallery.output_dir(), "easy-cloud-gpu")
     os.makedirs(outdir, exist_ok=True)
@@ -363,14 +369,24 @@ async def comfy_fetch(request):
             continue
         q = "filename=%s&subfolder=%s&type=%s" % tuple(quote(str(f.get(k) or d), safe="")
                                                        for k, d in (("filename", ""), ("subfolder", ""), ("type", "output")))
-        dst = gallery.unique_path(outdir, name)
-        async with session().get(f"{host}/view?{q}", headers=headers) as r:
-            if r.status != 200:
-                continue
-            with open(dst + ".part", "wb") as fh:
-                async for chunk in r.content.iter_chunked(1024 * 1024):
-                    fh.write(chunk)
-        os.replace(dst + ".part", dst)
+        dst = gallery.reserve_path(outdir, name)   # zwei GPUs liefern oft denselben Dateinamen
+        try:
+            async with session().get(f"{host}/view?{q}", headers=headers) as r:
+                if r.status != 200:
+                    os.remove(dst)
+                    continue
+                with open(dst + ".part", "wb") as fh:
+                    async for chunk in r.content.iter_chunked(1024 * 1024):
+                        fh.write(chunk)
+            os.replace(dst + ".part", dst)
+        except Exception:
+            for p in (dst, dst + ".part"):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            raise
+        act(slot)["last"] = time.time()
         t = await asyncio.to_thread(gallery.place, dst, str(data.get("model") or ""), str(data.get("kind") or ""),
                                     str(data.get("prompt") or ""), "cloud")
         ref = gallery.file_ref(t)
@@ -427,7 +443,9 @@ async def _idle_one(x):
         host = await target(slot)
         headers = auth_headers()
         async with session().get(host + "/queue", headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
-            q = await r.json() if r.status == 200 else {}
+            if r.status != 200:
+                return                        # nicht sicher -> lieber nicht pausieren
+            q = await r.json()
         if q.get("queue_running") or q.get("queue_pending"):
             A["last"] = time.time()
             return
@@ -437,7 +455,7 @@ async def _idle_one(x):
             A["last"] = time.time()
             return
     except Exception:
-        pass
+        return                                # Cloud-GPU antwortet nicht sicher -> nicht pausieren
     try:
         await hf("POST", f"/api/spaces/{x['id']}/pause")
         st = cstate()
@@ -469,5 +487,6 @@ def tick():
 
 @routes.post("/easy/cloud/comfy/touch")
 async def comfy_touch(request):
-    act(req_slot(request))["last"] = time.time()
+    data = await request.json() if request.can_read_body else {}
+    act(req_slot(request, data if isinstance(data, dict) else {}))["last"] = time.time()
     return web.json_response({"ok": True})

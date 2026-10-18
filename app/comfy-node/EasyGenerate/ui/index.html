@@ -691,9 +691,9 @@ function renderStudio(){
 }
 function updateGo(){
   const info = curInfo();
-  if($("#cGo")){ $("#cGo").disabled = !!state.run || !!cloud.run || !online; }
+  if($("#cGo")){ $("#cGo").disabled = !!cloud.run || !online; }
   const b = curB();
-  $("#go").disabled = !info || !!(b && gpuPrep[b]) || !!(typeof cloud !== "undefined" && cloud.run) || !online;
+  $("#go").disabled = !info || !!(b && gpuPrep[b]) || !online;
   $("#goHint").textContent = !online ? "ComfyUI läuft nicht." : state.runs.some(r => r.B === b) ? "Es wird gerade etwas erstellt – weitere Aufträge kommen in die Warteschlange." : (info && !info.pos ? "Dieses Werkzeug braucht keinen Text – einfach die Eingabe auswählen und starten." : "");
 }
 $("#toolSel").onchange = e => { state.active[state.kind] = e.target.value; api("/easy/config", { active: state.active }); renderStudio(); };
@@ -789,13 +789,13 @@ async function generate(){
   let seed;
   if($("#seedRand").checked){ seed = Math.floor(Math.random() * 2 ** 48); $("#seed").value = seed; }
   else seed = Math.max(0, parseInt($("#seed").value || "0", 10));
+  // alles sofort festhalten – während die GPU startet, darf man schon das nächste Video vorbereiten
   const promptText = $("#prompt").value.trim(), units = workUnits(), est = estimate();
-  state.submitting[B] = true; clearTimeout(autoPauseT[B]);
+  const wf = buildPrompt({}, seed), imgs = info.images.map(im => [im, state.images[im.id]]);
+  state.submitting[B] = (state.submitting[B] || 0) + 1; clearTimeout(autoPauseT[B]);
   try{
     if(B && !(await gpuPrepare(key, B))) return;
-    const names = {};
-    for(const im of info.images) names[im.id] = await uploadImage(state.images[im.id], B);
-    const wf = buildPrompt(names, seed);
+    for(const [im, img] of imgs) wf[im.id].inputs[im.key] = await uploadImage(img, B);
     let rpSeq = null;
     if(B){ try{ rpSeq = (await api(B + "/easy/progress?since=999999999")).seq || 0; }catch(e){} }
     const r = await fetch(B + "/prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: wf, client_id: cid }) });
@@ -812,7 +812,7 @@ async function generate(){
       toast("📋 " + esc(T("In die Warteschlange gestellt")) + ` – ${esc(laneName(B))} (${state.queue.filter(x => x.B === B).length + 1})`, "ok", 3000);
     } else startJob(job);
   }catch(e){ toast("❌ " + esc(T(friendly(gpuErr(String(e.message || e))))), "err", 8000); if(!state.runs.length) showMsg("err", friendly(gpuErr(String(e.message || e)))); }
-  finally{ state.submitting[B] = false; paint(); renderQueue(); updateGo(); if(B) maybeAutoPause(B); }
+  finally{ state.submitting[B]--; paint(); renderQueue(); updateGo(); if(B) maybeAutoPause(B); }
 }
 function startJob(job, keepStart){
   if(!keepStart) job.start = Date.now();
@@ -830,10 +830,10 @@ function tick(run){
 }
 // Fortschritt anzeigen: großer Balken = Auftrag des gerade gewählten Rechners, alle anderen in der Liste
 function paint(){
-  if(cloud.run) return;                       // HuggingFace-Cloud nutzt den Balken gerade selbst
   const b = curB(), run = focusRun(), prep = !state.runs.some(r => r.B === b) && b && gpuPrep[b];
   const box = $("#progBox");
-  if(prep){
+  if(cloud.run){}                              // HuggingFace-Cloud nutzt den Balken gerade selbst – die Liste unten zeigt den Rest
+  else if(prep){
     box.classList.remove("hidden");
     $("#progTxt").textContent = T(prep.txt || "Bereite vor …"); $("#bar").style.width = Math.max(2, prep.pct || 2) + "%";
     $("#timeTxt").textContent = fmtTime((Date.now() - prep.start) / 1000); $("#etaRun").textContent = "";
@@ -877,7 +877,7 @@ async function pollDone(run){
   }catch(e){}
 }
 function endRun(run){
-  if(!run) return;
+  if(!run || !state.runs.includes(run)) return;
   clearTimeout(run.timer);
   state.runs = state.runs.filter(r => r !== run);
   const next = state.queue.find(j => j.B === run.B);           // nächster Auftrag für denselben Rechner
@@ -887,7 +887,8 @@ function endRun(run){
 function slimWf(wf){ const o = {}; for(const [id, n] of Object.entries(wf || {})) o[id] = { class_type: n.class_type, _meta: n._meta }; return o; }
 function saveJobs(){
   const pick = j => ({ id: j.id, key: j.key, kind: j.kind, B: j.B, sub: j.sub, start: j.start, total: j.total, wf: j.wf, units: j.units, est: j.est, prompt: j.prompt, title: j.title });
-  store.set("jobs", [...state.runs, ...state.queue].map(pick));
+  const all = [...state.runs, ...state.queue, ...(state.restoring || []).filter(j => ![...state.runs, ...state.queue].some(x => x.id === j.id))];
+  store.set("jobs", all.map(pick));
 }
 function renderQueue(){
   const el = $("#queueBox"); if(!el) return;
@@ -922,16 +923,22 @@ async function removeQueued(id){
   if(j.B) maybeAutoPause(j.B);
 }
 async function cancelRun(run){
+  if(!run || run.finished) return;
+  run.cancelling = true;
   try{ await api((run.B || "") + "/queue", { delete: [run.id] }); }catch(e){}
-  try{ await fetch((run.B || "") + "/interrupt", { method: "POST" }); }catch(e){}
+  // nur diesen Auftrag stoppen – nicht einen anderen, der dort schon angefangen hat
+  try{ await fetch((run.B || "") + "/interrupt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt_id: run.id }) }); }catch(e){}
   fail(run, "Abgebrochen.");
 }
 // Nach dem Neuladen: Aufträge wieder aufnehmen, die der Server noch kennt
 async function restoreJobs(){
   const saved = store.get("jobs", []);
   if(!Array.isArray(saved) || !saved.length) return;
+  state.restoring = saved.slice();      // solange geprüft wird, bleiben sie gespeichert
+  if(!gpu.list && saved.some(j => j.B)) await loadGpuInfo();
   const keep = [];
   for(const j of saved){
+    if(j.B && gpu.list && !gpuEntry(j.B)){ state.restoring = state.restoring.filter(x => x !== j); continue; }   // diese GPU gibt es nicht mehr
     try{
       const q = await api((j.B || "") + "/queue");
       const has = arr => (arr || []).some(e => e && e[1] === j.id);
@@ -941,15 +948,25 @@ async function restoreJobs(){
       else if(!q || q.error) keep.push(j);    // Server gerade nicht erreichbar – nicht verwerfen
     }catch(e){ keep.push(j); }
   }
-  if(!keep.length){ store.set("jobs", []); return; }
+  state.restoring = null;
+  if(!keep.length){ saveJobs(); return; }
   for(const j of keep){
+    if([...state.runs, ...state.queue].some(x => x.id === j.id)) continue;
     if(state.runs.some(r => r.B === j.B)) state.queue.push(j);
     else startJob(Object.assign(j, { rpSeq: null }), true);
   }
   saveJobs(); renderQueue(); updateGo();
 }
+// Alle Aufträge einer GPU beenden (pausiert, gelöscht, neu gestartet) – laufende und wartende
+function dropLane(B, text, keepQueued){
+  const waiting = keepQueued ? [] : state.queue.filter(j => j.B === B);
+  if(waiting.length){ state.queue = state.queue.filter(j => j.B !== B); saveJobs(); renderQueue(); }
+  state.runs.filter(r => r.B === B).forEach(r => fail(r, text));
+  if(waiting.length) toast("📋 " + esc(laneName(B)) + ": " + esc(T(`${waiting.length} wartende Aufträge entfernt.`)), "warn", 8000);
+}
+const B_OF_SPACE = id => { const e = (gpu.list || []).find(x => x.id === id); return e ? e.B : null; };
 function fail(run, text){
-  if(!run) return;
+  if(!run || run.finished || !state.runs.includes(run)) return;
   run.finished = true; endRun(run);
   showMsg(text === "Abgebrochen." ? "warn" : "err", lanePrefix(run) + T(text));
   if(run.B) maybeAutoPause(run.B);
@@ -962,9 +979,11 @@ function maybeAutoPause(B){
   clearTimeout(autoPauseT[B]);
   autoPauseT[B] = setTimeout(async () => {
     if(!store.get("gpuPauseAfter", false) || gpuBusy(B)) return;   // inzwischen neuer Auftrag? Dann nicht pausieren
-    await loadGpuInfo();
-    const info = gpuEntry(B);
-    if(!info || !info.id || ["PAUSED", "SLEEPING", "STOPPED"].includes(info.stage)) return;
+    const info = await api("/easy/cloud/comfy/info?slot=" + slotOfB(B)).catch(() => null);
+    if(!info || !info.id || info.stage !== "RUNNING") return;      // nur eine fertig laufende GPU – nicht beim Einrichten/Starten
+    const q = await api(B + "/queue").catch(() => null);            // auch der Server selbst muss leer sein
+    if(!q || q.error || (q.queue_running || []).length || (q.queue_pending || []).length) return;
+    if(!store.get("gpuPauseAfter", false) || gpuBusy(B)) return;   // nach dem Warten nochmal prüfen
     const r = await api("/easy/cloud/rented/pause", { space: info.id });
     if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
     toast("☕ " + esc((gpu.list.length > 1 ? `GPU ${info.slot}: ` : "") + T("Warteschlange fertig – Cloud-GPU pausiert. Es entstehen keine Kosten mehr.")), "ok", 10000);
@@ -1070,16 +1089,29 @@ async function remoteProgress(run){
   }catch(e){}
   finally{ run.rpBusy = false; }
   if(alive() && (!run.poll || Date.now() - run.poll > 6000)){ run.poll = Date.now(); pollDone(run); }
-  // Hat die Cloud-GPU den Auftrag verloren (z. B. neu gestartet)? Dann nicht ewig warten.
+  // Hat die Cloud-GPU den Auftrag verloren (neu gestartet, pausiert, gelöscht)? Dann nicht ewig warten.
   if(alive() && Date.now() - (run.qAt || run.start) > 20000){
     run.qAt = Date.now();
+    const LOST = "Die Cloud-GPU hat den Auftrag nicht mehr (vermutlich neu gestartet oder pausiert). Bitte nochmal erstellen.";
     try{
       const q = await api(run.B + "/queue");
-      const has = arr => (arr || []).some(e => e && e[1] === run.id);
-      if(q && !q.error && !has(q.queue_running) && !has(q.queue_pending)){
-        const h = await api(run.B + "/history/" + run.id);
-        if(!h || !h[run.id]){ run.lost = (run.lost || 0) + 1; if(run.lost >= 2 && alive()) fail(run, "Die Cloud-GPU hat den Auftrag nicht mehr (vermutlich neu gestartet oder pausiert). Bitte nochmal erstellen."); }
-      } else run.lost = 0;
+      const has = (arr, id) => (arr || []).some(e => e && e[1] === id);
+      if(q && !q.error && Array.isArray(q.queue_running)){
+        if(!has(q.queue_running, run.id) && !has(q.queue_pending, run.id)){
+          const h = await api(run.B + "/history/" + run.id);
+          if(!h || !h[run.id]){ run.lost = (run.lost || 0) + 1; if(run.lost >= 2 && alive()){
+            // wartende Aufträge derselben GPU, die der Server auch nicht mehr kennt, gleich mit entfernen
+            const gone = state.queue.filter(j => j.B === run.B && !has(q.queue_pending, j.id) && !has(q.queue_running, j.id));
+            if(gone.length){ state.queue = state.queue.filter(j => !gone.includes(j)); saveJobs(); renderQueue(); toast("📋 " + esc(laneName(run.B)) + ": " + esc(T(`${gone.length} wartende Aufträge entfernt.`)), "warn", 8000); }
+            fail(run, LOST);
+          } }
+        } else run.lost = 0;
+      } else {
+        // Cloud-GPU antwortet nicht: ist sie aus oder gelöscht?
+        const i = await api("/easy/cloud/comfy/info?slot=" + slotOfB(run.B));
+        if(i && i.exists === false) dropLane(run.B, "Diese Cloud-GPU gibt es nicht mehr.");
+        else if(i && ["PAUSED", "SLEEPING", "STOPPED", "GONE"].includes(i.stage)){ run.lost = (run.lost || 0) + 1; if(run.lost >= 2 && alive()) dropLane(run.B, LOST); }
+      }
     }catch(e){}
   }
 }
@@ -1088,8 +1120,10 @@ const gpu = { info: null, list: null, adding: false };
 async function loadGpuInfo(){
   try{
     const j = await api("/easy/cloud/comfy/list");
-    gpu.list = j.items || []; gpu.spaceToken = j.space_token; gpu.version = j.version;
-  }catch(e){ gpu.list = gpu.list || []; }
+    if(j && Array.isArray(j.items)){ gpu.list = j.items; gpu.spaceToken = j.space_token; gpu.version = j.version; }
+    else gpu.list = gpu.list || null;           // Fehler: alte Liste behalten (sonst würde „GPU 1 einrichten“ angeboten)
+  }catch(e){ gpu.list = gpu.list || null; }
+  if(!gpu.list){ gpu.info = null; return null; }
   const e = gpuSel();
   gpu.info = e || { exists: false, space_token: gpu.spaceToken, version: gpu.version };
   return gpu.info;
@@ -1126,9 +1160,8 @@ async function gpuPrepare(name, B){
   const done = ok => { clearInterval(timer); delete gpuPrep[B]; updateGo(); renderQueue(); paint(); if(state.compute[state.kind] === "gpu") renderGpuBar(); return ok; };
   const pre = () => (gpu.list || []).length > 1 ? `GPU ${slotOfB(B)}: ` : "";
   try{
-    await loadGpuInfo();
-    let info = gpuEntry(B);
-    if(!info){ showMsg("warn", "Es ist noch keine Cloud-GPU eingerichtet."); return done(false); }
+    let info = await api("/easy/cloud/comfy/info?slot=" + slotOfB(B)).catch(() => null);
+    if(!info || !info.exists){ showMsg("warn", "Es ist noch keine Cloud-GPU eingerichtet."); return done(false); }
     if(!info.space_token){ showMsg("err", gpuErr("AUTH")); return done(false); }
     const START = { BUILDING: "Die Cloud-GPU wird eingerichtet (beim ersten Mal ca. 10 Min.) …", RUNNING_BUILDING: "Die Cloud-GPU wird aktualisiert …", APP_STARTING: "Die Cloud-GPU startet …", RUNNING_APP_STARTING: "Die Cloud-GPU startet …" };
     let woke = false;
@@ -1144,7 +1177,9 @@ async function gpuPrepare(name, B){
       } else if(START[info.stage]) say(START[info.stage]);
       else { showMsg("err", pre() + T(`Die Cloud-GPU konnte nicht starten (${info.stage}). Unter ☁️ Cloud → 🖥️ GPU mieten nachsehen.`)); return done(false); }
       await new Promise(r => setTimeout(r, 5000));
-      await loadGpuInfo(); const st0 = info.stage; info = gpuEntry(B) || info;
+      const st0 = info.stage, ni = await api("/easy/cloud/comfy/info?slot=" + slotOfB(B)).catch(() => null);
+      if(ni && ni.exists){ info = ni; const e = gpuEntry(B); if(e) Object.assign(e, { stage: ni.stage, current: ni.current }); }
+      else if(ni && ni.exists === false){ showMsg("err", pre() + T("Diese Cloud-GPU gibt es nicht mehr.")); return done(false); }
       if(info.stage !== st0 && state.compute[state.kind] === "gpu") renderGpuBar();
     }
     // Modelle auf dem Server
@@ -1252,10 +1287,11 @@ async function rentedAction(id, act){
   const e = (gpu.list || []).find(x => x.id === id), B = e ? e.B : null;
   const mine = B ? state.runs.filter(r => r.B === B) : [];
   if(act === "pause" && (mine.length || (B && state.queue.some(j => j.B === B))) && !confirm(T("Gerade wird etwas erstellt. Trotzdem pausieren? Der Auftrag geht dabei verloren."))) return;
+  if(act === "pause" && B && gpuPrep[B]) gpuPrep[B].cancel = true;
   const r = await api("/easy/cloud/rented/" + act, { space: id });
   if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
   toast(act === "pause" ? "⏸ " + esc(T("Pausiert – kostet jetzt nichts mehr.")) : "▶ " + esc(T("Die GPU startet – das dauert ein paar Minuten. Im Studio siehst du den Fortschritt.")), "ok", 5000);
-  if(act === "pause" && B){ state.queue = state.queue.filter(j => j.B !== B); mine.forEach(run => fail(run, "Abgebrochen.")); saveJobs(); renderQueue(); }
+  if(act === "pause" && B) dropLane(B, "Abgebrochen.");
   delete cloud.info[id];
   await loadGpuInfo(); renderStudio();
   setTimeout(async () => { await loadGpuInfo(); renderStudio(); }, 3000);
@@ -1741,9 +1777,14 @@ async function drawRented(){
         const v = await pickHardware(x.requested || x.current || x.hardware);
         if(!v) return; body.hardware = v;
       }
+      const laneB = x.kind === "comfy" ? (B_OF_SPACE(x.id) || (+(x.slot || 1) > 1 ? "/easy/remote" + x.slot : "/easy/remote")) : null;
+      const busy = laneB && [...state.runs, ...state.queue].some(j => j.B === laneB);
+      if(busy && ["pause", "hw"].includes(act) && !confirm(T("Gerade wird etwas erstellt. Trotzdem pausieren? Der Auftrag geht dabei verloren."))) return;
       b.disabled = true;
+      if(laneB && gpuPrep[laneB] && ["pause", "hw", "delete"].includes(act)) gpuPrep[laneB].cancel = true;
       const r = await api("/easy/cloud/rented/" + (act === "hw" ? "hardware" : act), body);
       if(r.error) toast("❌ " + esc(cloudErr(r.error)), "err");
+      else if(laneB && ["pause", "hw", "delete"].includes(act)){ dropLane(laneB, "Abgebrochen."); gpu.list = null; }
       delete cloud.info[x.id];
       if(act === "start" && !r.error) toast("▶ " + esc(T("Die GPU startet – das dauert ein paar Minuten. Im Studio siehst du den Fortschritt.")), "ok", 6000);
       drawRented(); setTimeout(drawRented, 4000);
@@ -2754,7 +2795,7 @@ if(host){
     else $("#updMsg").innerHTML = `<div class="msg ok">Du hast die neueste Version.</div>`;
   };
   $("#cUpd").onclick = async () => {
-    if(state.run){ $("#cMsg").innerHTML = `<div class="msg warn">Bitte warten, bis die aktuelle Erstellung fertig ist.</div>`; return; }
+    if(state.runs.some(r => !r.B)){ $("#cMsg").innerHTML = `<div class="msg warn">Bitte warten, bis die aktuelle Erstellung fertig ist.</div>`; return; }
     $("#cMsg").innerHTML = `<div class="msg warn">ComfyUI wird aktualisiert und neu gestartet – das Fenster lädt danach neu …</div>`;
     const r = await host.updateComfy();
     if(r && r.error) $("#cMsg").innerHTML = `<div class="msg err">${esc(r.error)}</div>`;

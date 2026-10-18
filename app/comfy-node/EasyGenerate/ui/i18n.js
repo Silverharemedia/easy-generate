@@ -701,6 +701,7 @@
     ["Eigene Cloud-GPU einrichten", "Set up your own cloud GPU", "Настроить свою облачную GPU"], ["Cloud-GPU einrichten", "Set up cloud GPU", "Настроить облачную GPU"],
     ["Fertig, aber keine Ausgabe gefunden. Schau in den Ausgabe-Ordner.", "Done, but no output found. Check the output folder.", "Готово, но результат не найден. Посмотри в папке вывода."],
     ["Fertig – hole das Ergebnis von der Cloud-GPU …", "Done – fetching the result from the cloud GPU …", "Готово – забираю результат с облачной GPU …"],
+    ["Diese Cloud-GPU gibt es nicht mehr.", "This cloud GPU no longer exists.", "Этой облачной GPU больше нет."],
     ["Pausiert – kostet jetzt nichts mehr.", "Paused – no more costs now.", "Приостановлено – больше ничего не стоит."],
     ["Kein Guthaben vorhanden – zum Mieten zuerst bei HuggingFace Guthaben aufladen.", "No credit available – top up at HuggingFace before renting.", "Нет баланса – перед арендой пополни баланс на HuggingFace."],
     ["✓ Bei HuggingFace angemeldet.", "✓ Signed in to HuggingFace.", "✓ Вход в HuggingFace выполнен."],
@@ -729,6 +730,8 @@
   const tTask = s => ({ "Text → Video": ["Text → Video", "Текст → Видео"], "Bild → Video": ["Image → Video", "Изображение → Видео"], "Text → Bild": ["Text → Image", "Текст → Изображение"], "Bild bearbeiten": ["Edit image", "Редактировать"] }[s] || [s, s])[lang === "ru" ? 1 : 0];
   const L = (en, ru) => lang === "ru" ? ru : en;
   PAT.unshift(
+    [/^(\d+) wartende Aufträge entfernt\.$/, (m, n) => L(`${n} waiting jobs removed.`, `Удалено ожидающих заданий: ${n}.`)],
+    [/^GPU (\d+) gibt es schon\.$/, (m, n) => L(`GPU ${n} already exists.`, `GPU ${n} уже есть.`)],
     [/^Weitere Cloud-GPU mieten \(GPU (\d+)\)$/, (m, n) => L(`Rent another cloud GPU (GPU ${n})`, `Арендовать ещё одну облачную GPU (GPU ${n})`)],
     [/^GPU (\d+) mieten$/, (m, n) => L(`Rent GPU ${n}`, `Арендовать GPU ${n}`)],
     [/^So kannst du z\. B\. auf GPU 1 Bild → Video und auf GPU (\d+) Text → Video erstellen\.$/, (m, n) => L(`For example, image → video on GPU 1 and text → video on GPU ${n}.`, `Например, изображение → видео на GPU 1 и текст → видео на GPU ${n}.`)],

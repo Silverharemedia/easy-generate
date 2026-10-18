@@ -12,6 +12,7 @@ import asyncio
 import os
 import re
 import shutil
+import threading
 import time
 
 from aiohttp import web
@@ -57,8 +58,14 @@ def index():
     return read_json(INDEX_FILE, {})
 
 
+# Ein Schloss fuer alle Aenderungen am Index und fuers Vergeben von Dateinamen:
+# mehrere Cloud-GPUs koennen gleichzeitig fertig werden.
+LOCK = threading.RLock()
+
+
 def save_index(ix):
-    write_json(INDEX_FILE, ix)
+    with LOCK:
+        write_json(INDEX_FILE, ix)
 
 
 def key(path):
@@ -74,10 +81,24 @@ def unique_path(folder, name):
     base, ext = os.path.splitext(name)
     p = os.path.join(folder, name)
     i = 1
-    while os.path.exists(p):
+    while os.path.exists(p) or os.path.exists(p + ".part"):
         p = os.path.join(folder, f"{base}_{i}{ext}")
         i += 1
     return p
+
+
+def reserve_path(folder, name):
+    """Freien Dateinamen sicher belegen (legt eine leere Datei an), auch wenn mehrere Downloads gleichzeitig laufen."""
+    base, ext = os.path.splitext(name)
+    i = 0
+    while True:
+        p = os.path.join(folder, name if i == 0 else f"{base}_{i}{ext}")
+        try:
+            fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            return p
+        except FileExistsError:
+            i += 1
 
 
 def resolve_output(f):
@@ -103,6 +124,11 @@ def file_ref(path):
 
 def place(path, model, kind, prompt="", source="local"):
     """Neues Ergebnis einsortieren (verschieben je nach Einstellung) und im Index vermerken."""
+    with LOCK:
+        return _place(path, model, kind, prompt, source)
+
+
+def _place(path, model, kind, prompt, source):
     mode, gdir = settings()
     target = path
     try:
@@ -227,7 +253,14 @@ def scan():
     items.sort(key=lambda x: -x["created"])
     # verwaiste Index-Eintraege aufraeumen, neu erkannte Modelle merken
     if _DIRTY[0] or any(k not in seen for k in ix):
-        save_index({k: v for k, v in ix.items() if k in seen})
+        with LOCK:      # neu lesen, damit gerade hinzugekommene Ergebnisse nicht verloren gehen
+            cur = index()
+            for k in [k for k in cur if k in ix and k not in seen]:
+                cur.pop(k, None)
+            for k in seen:
+                if k in ix:
+                    cur[k] = ix[k]
+            save_index(cur)
         _DIRTY[0] = False
     return items
 
@@ -321,9 +354,10 @@ async def gallery_delete(request):
         os.remove(ap)
     except OSError as e:
         return web.json_response({"error": str(e)}, status=500)
-    ix = index()
-    ix.pop(key(ap), None)
-    save_index(ix)
+    with LOCK:
+        ix = index()
+        ix.pop(key(ap), None)
+        save_index(ix)
     return web.json_response({"ok": True})
 
 
@@ -367,6 +401,10 @@ async def gallery_migrate(request):
         return web.json_response({"error": "Kein eigener Galerie-Ordner eingestellt."}, status=400)
 
     def work():
+        with LOCK:
+            return _migrate()
+
+    def _migrate():
         ix = index()
         n = 0
         base = output_dir()
@@ -375,6 +413,11 @@ async def gallery_migrate(request):
                 if not f.lower().endswith(MEDIA):
                     continue
                 p = os.path.join(dirpath, f)
+                try:
+                    if os.path.getsize(p) == 0:      # gerade reserviert, Download laeuft noch
+                        continue
+                except OSError:
+                    continue
                 meta = ix.get(key(p)) or {}
                 model = meta.get("model") or ("Cloud" if os.path.basename(dirpath) == "easy-cloud" else (guess_model(p) or UNKNOWN))
                 folder = os.path.join(gdir, safe_folder(model))
