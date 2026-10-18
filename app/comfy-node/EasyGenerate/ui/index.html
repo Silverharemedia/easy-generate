@@ -132,15 +132,28 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
 .ci .ac{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:4px}.ci .ac .btn{font-size:13px;padding:6px 10px}
 .avatar{width:38px;height:38px;border-radius:50%;background:var(--panel2);flex:none;object-fit:cover}
 @media (max-width:1180px){.mon{display:none}}
-#queueBox{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
-#queueBox h4{margin:0 0 8px;font-size:13px;color:var(--muted);font-weight:600}
-.qitem{display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);margin-bottom:6px;font-size:13px}
-.qitem.run{border-color:var(--acc)}
-.qitem .qn{width:20px;text-align:center;color:var(--muted);flex:none}
-.qitem .qt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.qitem .qs{flex:none;color:var(--muted);font-size:12px}
-.qitem .qx{flex:none;background:none;border:0;color:var(--muted);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px}
-.qitem .qx:hover{color:#ffb3bb;background:#2c1418}
+/* Warteschlange: eigene Spalte rechts neben dem Ergebnis (bei schmalem Fenster darunter) */
+.wrap.wide{max-width:1680px}
+#studioGrid.withq{grid-template-columns:minmax(0,440px) minmax(0,1fr) minmax(280px,340px)}
+@media (max-width:1560px){#studioGrid.withq{grid-template-columns:minmax(0,440px) minmax(0,1fr)} #studioGrid.withq>#queueCard{grid-column:2}}
+@media (max-width:1000px){#studioGrid.withq{grid-template-columns:1fr} #studioGrid.withq>#queueCard{grid-column:auto}}
+.qcard{align-self:start;padding:12px;max-height:calc(100vh - 140px);overflow:auto}
+#queueBox h4{margin:0 0 10px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+#queueBox h4 .sp{flex:1}
+.qlane{display:flex;align-items:center;gap:7px;margin:12px 0 6px;font-size:12px;font-weight:600;color:var(--muted)}
+.qlane i{width:10px;height:10px;border-radius:50%;flex:none}
+.qitem{display:flex;gap:9px;padding:8px;border:1px solid var(--line);border-left:4px solid var(--lc,var(--line));border-radius:10px;background:var(--panel2);margin-bottom:7px;font-size:12px}
+.qitem.run{box-shadow:0 0 0 1px var(--lc) inset}
+.qitem.done{cursor:pointer;opacity:.92} .qitem.done:hover{opacity:1;border-color:var(--lc)}
+.qthumb{width:58px;height:58px;border-radius:7px;background:#0d1117 center/cover no-repeat;flex:none;display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--muted)}
+.qbody{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.qtitle{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qprompt{color:var(--text);opacity:.85;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.qfoot{display:flex;align-items:center;gap:4px;margin-top:2px}
+.qs{flex:1;min-width:0;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qbtn{flex:none;background:none;border:1px solid transparent;color:var(--muted);cursor:pointer;font-size:12px;padding:1px 5px;border-radius:6px;line-height:1.4}
+.qbtn:hover{color:var(--text);border-color:var(--line);background:var(--panel)}
+.qbtn.x:hover{color:#ffb3bb;background:#2c1418;border-color:#5a2029}
 </style>
 </head>
 <body>
@@ -180,7 +193,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
         <button class="btn" type="button" id="moreModels">+ Weitere Modelle</button>
       </div>
       <div id="notReady" class="msg warn hidden" style="margin-bottom:14px"></div>
-      <div class="grid">
+      <div class="grid" id="studioGrid">
         <div class="card hidden" id="cloudCard">
           <div class="toolsel" style="margin-bottom:8px">
             <select class="sel" id="cSel" style="width:auto;flex:1;min-width:0"></select>
@@ -259,11 +272,11 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
             <div class="bar"><div id="bar"></div></div>
             <div class="actions" style="margin-top:10px"><button class="btn danger" id="stop">Abbrechen</button></div>
           </div>
-          <div id="queueBox" class="hidden"></div>
           <div id="out"></div>
           <div class="actions hidden" id="resActions"><button class="btn pri hidden" id="showDir" type="button">📂 Im Ordner zeigen</button><a class="btn" id="dl" download>Herunterladen</a><button class="btn" id="again">Nochmal (neuer Seed)</button></div>
           <p class="hint" id="keptHint" style="margin:6px 0 0"></p>
         </div>
+        <div class="card qcard hidden" id="queueCard"><div id="queueBox"></div></div>
       </div>
     </div>
   </section>
@@ -567,6 +580,7 @@ function showTab(t){
   $("#settings").classList.toggle("hidden", t !== "set");
   $("#cloud").classList.toggle("hidden", t !== "cloud");
   if(t === "video" || t === "image"){ state.kind = t; renderStudio(); }
+  else document.querySelector("main .wrap").classList.remove("wide");
   if(t === "cloud") renderCloud(true);
   if(t === "gal") loadGallery();
   if(t === "models") loadCatalog();
@@ -821,10 +835,12 @@ async function generate(){
   // alles sofort festhalten – während die GPU startet, darf man schon das nächste Video vorbereiten
   const promptText = $("#prompt").value.trim(), units = workUnits(), est = estimate();
   const wf = buildPrompt({}, seed), imgs = info.images.map(im => [im, state.images[im.id]]);
+  const thumb = await makeThumb((imgs.find(([im, img]) => img && !img.audio) || [])[1]);
   state.submitting[B] = (state.submitting[B] || 0) + 1; clearTimeout(autoPauseT[B]);
   try{
     if(B && !(await gpuPrepare(key, B))) return;
-    for(const [im, img] of imgs) wf[im.id].inputs[im.key] = await uploadImage(img, B);
+    const inputs = [];
+    for(const [im, img] of imgs){ const name = await uploadImage(img, B); wf[im.id].inputs[im.key] = name; inputs.push({ id: im.id, name }); }
     let rpSeq = null;
     if(B){ try{ rpSeq = (await api(B + "/easy/progress?since=999999999")).seq || 0; }catch(e){} }
     const r = await fetch(B + "/prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: wf, client_id: cid }) });
@@ -835,7 +851,7 @@ async function generate(){
       showMsg("err", friendly(lines.join("\n"))); return;
     }
     const tool = state.installed.find(t => t.name === key);
-    const job = { id: j.prompt_id, key, kind: k, B, rpSeq, start: Date.now(), sub: Date.now(), total: Object.keys(wf).length, wf: slimWf(wf), units, est, prompt: promptText, title: tool ? tool.title : key };
+    const job = { id: j.prompt_id, key, kind: k, B, rpSeq, start: Date.now(), sub: Date.now(), total: Object.keys(wf).length, wf: slimWf(wf), units, est, prompt: promptText, title: tool ? tool.title : key, thumb, inputs };
     if(state.runs.some(x => x.B === B)){
       state.queue.push(job); saveJobs(); renderQueue();
       toast("📋 " + esc(T("In die Warteschlange gestellt")) + ` – ${esc(laneName(B))} (${state.queue.filter(x => x.B === B).length + 1})`, "ok", 3000);
@@ -869,7 +885,7 @@ function paint(){
   } else if(run){
     box.classList.remove("hidden");
     $("#progTxt").textContent = T(lanePrefix(run)) + T(run.txt || "");
-    $("#bar").style.width = Math.max(2, run.pct || 2) + "%";
+    $("#bar").style.width = Math.max(2, run.pct || 2) + "%"; $("#bar").style.background = run.B ? laneColor(run.B) : "";
     $("#timeTxt").textContent = fmtTime((Date.now() - run.start) / 1000); $("#etaRun").textContent = runEtaText(run);
   } else box.classList.add("hidden");
   for(const r of state.runs){ const el = document.getElementById("qs-" + r.id); if(el) el.textContent = T(r.txt || ""); }
@@ -915,33 +931,94 @@ function endRun(run){
 }
 function slimWf(wf){ const o = {}; for(const [id, n] of Object.entries(wf || {})) o[id] = { class_type: n.class_type, _meta: n._meta }; return o; }
 function saveJobs(){
-  const pick = j => ({ id: j.id, key: j.key, kind: j.kind, B: j.B, sub: j.sub, start: j.start, total: j.total, wf: j.wf, units: j.units, est: j.est, prompt: j.prompt, title: j.title });
+  const pick = j => ({ id: j.id, key: j.key, kind: j.kind, B: j.B, sub: j.sub, start: j.start, total: j.total, wf: j.wf, units: j.units, est: j.est, prompt: j.prompt, title: j.title, thumb: j.thumb, inputs: j.inputs });
   const all = [...state.runs, ...state.queue, ...(state.restoring || []).filter(j => ![...state.runs, ...state.queue].some(x => x.id === j.id))];
   store.set("jobs", all.map(pick));
 }
+// Jede GPU bekommt ihre eigene Farbe (dein PC grau)
+const LANE_COLORS = ["#4ea1ff", "#b07cff", "#3ecf8e", "#ffb020", "#ff6b9a", "#2dd4bf", "#f97316", "#a3e635"];
+const laneColor = B => !B ? "#8b95a7" : LANE_COLORS[(slotOfB(B) - 1) % LANE_COLORS.length];
+// kleines Vorschaubild der Eingabe (Bild oder erstes Videobild) für die Warteschlange
+async function makeThumb(img){
+  if(!img || img.audio) return null;
+  try{
+    let src;
+    if(img.video){
+      src = document.createElement("video"); src.muted = true; src.preload = "auto"; src.src = img.url;
+      await new Promise((ok, bad) => { src.onloadeddata = ok; src.onerror = bad; setTimeout(bad, 4000); });
+    } else { src = new Image(); src.src = img.url; await src.decode(); }
+    const w = src.videoWidth || src.naturalWidth, h = src.videoHeight || src.naturalHeight, k = 116 / Math.max(w, h);
+    const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+    c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.72);
+  }catch(e){ return null; }
+}
+state.done = store.get("jobsDone", []);
+function saveDone(){ state.done = state.done.slice(0, 8); store.set("jobsDone", state.done); }
 function renderQueue(){
-  const el = $("#queueBox"); if(!el) return;
+  const el = $("#queueBox"), card = $("#queueCard"); if(!el || !card) return;
   const all = [...state.runs, ...state.queue];
-  const preps = Object.entries(gpuPrep).filter(([B, p]) => p && state.runs.some(r => r.B === B));   // Vorbereitung, während dort schon etwas läuft
-  const lanes = [...new Set(all.map(j => j.B).concat(preps.map(([B]) => B)))];
-  const focus = focusRun();
-  if(all.length + preps.length < 2 && !(focus && focus.B !== curB())){ el.classList.add("hidden"); el.innerHTML = ""; return; }
-  el.classList.remove("hidden");
-  const x = (id, title) => `<button class="qx" type="button" data-q="${esc(id)}" title="${esc(T(title))}">✕</button>`;
-  let html = `<h4>📋 ${esc(T("Warteschlange"))} (${all.length})</h4>`;
+  const preps = Object.entries(gpuPrep).filter(([B, p]) => p);
+  const lanes = [...new Set(all.map(j => j.B).concat(preps.map(([B]) => B)))].sort((a, b) => (a ? slotOfB(a) : 0) - (b ? slotOfB(b) : 0));
+  const show = all.length || preps.length || state.done.length;
+  card.classList.toggle("hidden", !show);
+  $("#studioGrid").classList.toggle("withq", !!show);
+  document.querySelector("main .wrap").classList.toggle("wide", !!show && (state.tab === "video" || state.tab === "image"));
+  if(!show){ el.innerHTML = ""; return; }
+  const btn = (act, id, icon, title, cls) => `<button class="qbtn ${cls || ""}" type="button" data-a="${act}" data-q="${esc(id)}" title="${esc(T(title))}">${icon}</button>`;
+  const thumb = j => `<div class="qthumb" ${j.thumb ? `style="background-image:url('${j.thumb}')"` : ""}>${j.thumb ? "" : (j.kind === "image" ? "🖼️" : "🎬")}</div>`;
+  const tools = j => btn("copy", j.id, "📋", "Prompt kopieren") + (j.inputs && j.inputs.length || j.prompt ? btn("use", j.id, "↩", "Bild und Prompt übernehmen") : "");
+  const item = (j, status, extra, cls, sid) => `<div class="qitem ${cls}" style="--lc:${laneColor(j.B)}" data-id="${esc(j.id)}" title="${esc(j.prompt || "")}">${thumb(j)}<div class="qbody"><div class="qtitle">${esc(j.title || j.key)}</div><div class="qprompt">${esc(j.prompt || "–")}</div><div class="qfoot"><span class="qs" ${sid ? `id="${sid}"` : ""}>${esc(status)}</span>${tools(j)}${extra}</div></div></div>`;
+  let html = `<h4>📋 <span>${esc(T("Warteschlange"))}</span> <span class="hint">(${all.length})</span><span class="sp"></span></h4>`;
+  if(!all.length && !preps.length) html += `<div class="hint" style="margin-bottom:8px">${esc(T("Gerade läuft nichts."))}</div>`;
   for(const B of lanes){
     const items = [...state.runs.filter(r => r.B === B), ...state.queue.filter(j => j.B === B)];
-    if(lanes.length > 1) html += `<div class="hint" style="margin:8px 0 4px;font-weight:600">${esc(laneName(B))}</div>`;
+    html += `<div class="qlane"><i style="background:${laneColor(B)}"></i>${esc(laneName(B))}</div>`;
+    const p = gpuPrep[B];
+    if(p) html += `<div class="qitem" style="--lc:${laneColor(B)}"><div class="qthumb">⏳</div><div class="qbody"><div class="qtitle" id="qp-${slugB(B)}">${esc(T(p.txt || "Bereite vor …"))}</div></div></div>`;
     html += items.map((j, i) => {
       const running = state.runs.includes(j);
-      return `<div class="qitem ${running ? "run" : ""}" title="${esc(j.prompt || "")}"><span class="qn">${running ? "▶" : i + 1}</span><span class="qt"><b>${esc(j.title || j.key)}</b> · ${esc((j.prompt || "").slice(0, 80) || "–")}</span><span class="qs" ${running ? `id="qs-${esc(j.id)}"` : ""}>${esc(running ? T(j.txt || "läuft") : T("wartet"))}</span>${running ? x(j.id, "Abbrechen") : x(j.id, "Aus der Warteschlange entfernen")}</div>`;
+      return item(j, running ? T(j.txt || "läuft") : `${i + 1}. ${T("wartet")}`, btn("x", j.id, "✕", running ? "Abbrechen" : "Aus der Warteschlange entfernen", "x"), running ? "run" : "", running ? "qs-" + j.id : "");
     }).join("");
-    const p = gpuPrep[B];
-    if(p && state.runs.some(r => r.B === B)) html += `<div class="qitem"><span class="qn">…</span><span class="qt" id="qp-${slugB(B)}">${esc(T(p.txt || "Bereite vor …"))}</span></div>`;
+  }
+  if(state.done.length){
+    html += `<div class="qlane" style="margin-top:16px">✅ ${esc(T("Zuletzt fertig"))}<span style="flex:1"></span><button class="qbtn" type="button" data-a="clear" data-q="-" title="${esc(T("Liste leeren"))}">🗑</button></div>`;
+    html += state.done.map(j => item(j, (j.B ? "🚀 GPU " + slotOfB(j.B) : "🖥️ " + T("Mein PC")) + (j.secs ? " · " + fmtTime(j.secs) + " " + T("Min.") : ""), "", "done", "")).join("");
   }
   el.innerHTML = html;
-  el.querySelectorAll("[data-q]").forEach(b => b.onclick = () => removeQueued(b.dataset.q));
+  el.querySelectorAll("[data-a]").forEach(b => b.onclick = ev => { ev.stopPropagation(); queueAction(b.dataset.a, b.dataset.q); });
+  el.querySelectorAll(".qitem.done").forEach(d => d.onclick = () => { const j = state.done.find(x => x.id === d.dataset.id); if(j && j.files && j.files.length){ showResult(j.files); showMsg("ok", j.prompt ? "✅ " + j.prompt.slice(0, 80) : "✅"); } });
   paint();
+}
+const jobById = id => [...state.runs, ...state.queue, ...state.done].find(j => j.id === id);
+async function queueAction(act, id){
+  if(act === "x") return removeQueued(id);
+  if(act === "clear"){ state.done = []; saveDone(); renderQueue(); return; }
+  const j = jobById(id); if(!j) return;
+  if(act === "copy"){
+    try{ await navigator.clipboard.writeText(j.prompt || ""); toast("📋 " + esc(T("Prompt kopiert.")), "ok", 2000); }
+    catch(e){ const t = document.createElement("textarea"); t.value = j.prompt || ""; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); toast("📋 " + esc(T("Prompt kopiert.")), "ok", 2000); }
+    return;
+  }
+  if(act === "use") return reuseJob(j);
+}
+// Bild und Prompt eines Auftrags ins Formular übernehmen (für einen neuen Lauf)
+async function reuseJob(j){
+  if(j.kind && state.kind !== j.kind) showTab(j.kind);
+  if(j.key && toolsOf(state.kind).some(t => t.name === j.key) && state.active[state.kind] !== j.key){ state.active[state.kind] = j.key; renderStudio(); }
+  if(j.prompt != null){ $("#prompt").value = j.prompt; $("#prompt").dispatchEvent(new Event("input")); }
+  let got = 0;
+  for(const inp of j.inputs || []){
+    try{
+      const parts = String(inp.name).split("/"), fn = parts.pop(), sub = parts.join("/");
+      const r = await fetch(`${j.B || ""}/view?filename=${encodeURIComponent(fn)}&subfolder=${encodeURIComponent(sub)}&type=input`);
+      if(!r.ok) continue;
+      const blob = await r.blob();
+      setImage(inp.id, new File([blob], fn, { type: blob.type || "image/png" })); got++;
+    }catch(e){}
+  }
+  toast("↩ " + esc(T(j.inputs && j.inputs.length && !got ? "Prompt übernommen – das Bild ist nicht mehr verfügbar." : "Bild und Prompt übernommen.")), got || !(j.inputs || []).length ? "ok" : "warn", 3000);
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 async function removeQueued(id){
   const run = state.runs.find(r => r.id === id);
@@ -1008,23 +1085,26 @@ const pauseAfter = () => { try{ return sessionStorage.getItem("eg_pauseAfter") =
 function setPauseAfter(v){ try{ sessionStorage.setItem("eg_pauseAfter", v ? "1" : "0"); }catch(e){} if($("#gpuAuto")) $("#gpuAuto").checked = !!v; }
 store.set("gpuPauseAfter", false);   // alte, dauerhafte Einstellung nicht mehr verwenden
 function gpuBusy(B){ return !!gpuPrep[B] || !!state.submitting[B] || [...state.runs, ...state.queue].some(j => j.B === B) || !!(state.fetching || {})[B]; }
+const autoPauseArmed = new Set();   // GPUs, deren Pause schon geplant ist (auch wenn der Haken inzwischen wieder aus ist)
 function maybeAutoPause(B){
-  if(!B || !pauseAfter() || gpuBusy(B)) return;
-  clearTimeout(autoPauseT[B]);
+  if(!B || !(pauseAfter() || autoPauseArmed.has(B)) || gpuBusy(B)) return;
+  clearTimeout(autoPauseT[B]); autoPauseArmed.add(B);
   autoPauseT[B] = setTimeout(async () => {
-    if(!pauseAfter() || gpuBusy(B)) return;   // inzwischen neuer Auftrag? Dann nicht pausieren
-    const info = await api("/easy/cloud/comfy/info?slot=" + slotOfB(B)).catch(() => null);
-    if(!info || !info.id || info.stage !== "RUNNING") return;      // nur eine fertig laufende GPU – nicht beim Einrichten/Starten
-    const q = await api(B + "/queue").catch(() => null);            // auch der Server selbst muss leer sein
-    if(!q || q.error || (q.queue_running || []).length || (q.queue_pending || []).length) return;
-    if(!pauseAfter() || gpuBusy(B)) return;   // nach dem Warten nochmal prüfen
-    const r = await api("/easy/cloud/rented/pause", { space: info.id });
-    if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
-    // Hat keine andere GPU mehr Arbeit, ist der Haken erledigt und geht wieder aus
-    const last = !(gpu.list || []).some(g => g.B !== B && gpuBusy(g.B));
-    if(last) setPauseAfter(false);
-    toast("☕ " + esc((gpu.list.length > 1 ? `GPU ${info.slot}: ` : "") + T("Warteschlange fertig – Cloud-GPU pausiert. Es entstehen keine Kosten mehr.")) + (last ? " " + esc(T("Der Haken ☕ ist jetzt wieder aus.")) : ""), "ok", 10000);
-    await loadGpuInfo(); if(state.tab === "video" || state.tab === "image") renderStudio();
+    try{
+      if(gpuBusy(B)) return;   // inzwischen neuer Auftrag? Dann nicht pausieren
+      const info = await api("/easy/cloud/comfy/info?slot=" + slotOfB(B)).catch(() => null);
+      if(!info || !info.id || info.stage !== "RUNNING") return;      // nur eine fertig laufende GPU – nicht beim Einrichten/Starten
+      const q = await api(B + "/queue").catch(() => null);            // auch der Server selbst muss leer sein
+      if(!q || q.error || (q.queue_running || []).length || (q.queue_pending || []).length) return;
+      if(gpuBusy(B) || !autoPauseArmed.has(B)) return;   // nach dem Warten nochmal prüfen (oder von Hand abgeschaltet)
+      const r = await api("/easy/cloud/rented/pause", { space: info.id });
+      if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
+      // Hat keine andere GPU mehr Arbeit (und keine wartet aufs Pausieren), ist der Haken erledigt und geht wieder aus
+      const last = !(gpu.list || []).some(g => g.B !== B && (gpuBusy(g.B) || autoPauseArmed.has(g.B)));
+      if(last) setPauseAfter(false);
+      toast("☕ " + esc((gpu.list.length > 1 ? `GPU ${info.slot}: ` : "") + T("Warteschlange fertig – Cloud-GPU pausiert. Es entstehen keine Kosten mehr.")) + (last ? " " + esc(T("Der Haken ☕ ist jetzt wieder aus.")) : ""), "ok", 10000);
+      await loadGpuInfo(); if(state.tab === "video" || state.tab === "image") renderStudio();
+    } finally { autoPauseArmed.delete(B); }
   }, 4000);
 }
 async function finish(run){
@@ -1054,6 +1134,8 @@ async function finish(run){
     } else files = await toGallery(files, tool ? tool.title : run.key, run.kind, run.prompt ?? "");
     showResult(files);
     showMsg("ok", pre + T(`Fertig in ${fmtTime(secs)} Min.`) + (run.prompt ? " – " + run.prompt.slice(0, 60) : ""));
+    state.done.unshift({ id: run.id, key: run.key, kind: run.kind, B: run.B, title: run.title, prompt: run.prompt, thumb: run.thumb, inputs: run.inputs, files, secs, at: Date.now() });
+    saveDone(); renderQueue();
   } finally {
     if(run.B){ state.fetching[run.B]--; maybeAutoPause(run.B); }
   }
@@ -1255,7 +1337,7 @@ function renderGpuBar(){
   const busyOn = B => state.runs.filter(r => r.B === B).length + state.queue.filter(j => j.B === B).length;
   const chipsHtml = gpu.list.map(e => {
     const h = hwOf(e), n = busyOn(e.B);
-    return `<button class="chip ${e.slot === i.slot && !gpu.adding ? "act" : ""}" type="button" data-slot="${e.slot}">🚀 GPU ${e.slot}${h.pretty ? " · " + esc(h.pretty.replace(/^1x /, "")) : ""}<small><span style="color:${isOn(e.stage) ? "#4ade80" : "var(--muted)"}">●</span> ${esc(T(e.stage === "RUNNING" ? "läuft" : isOn(e.stage) ? "startet" : "aus"))}${n ? ` · ${n} ${esc(T(n === 1 ? "Auftrag" : "Aufträge"))}` : ""}</small></button>`;
+    return `<button class="chip ${e.slot === i.slot && !gpu.adding ? "act" : ""}" type="button" data-slot="${e.slot}"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${laneColor(e.B)};margin-right:6px"></span>🚀 GPU ${e.slot}${h.pretty ? " · " + esc(h.pretty.replace(/^1x /, "")) : ""}<small><span style="color:${isOn(e.stage) ? "#4ade80" : "var(--muted)"}">●</span> ${esc(T(e.stage === "RUNNING" ? "läuft" : isOn(e.stage) ? "startet" : "aus"))}${n ? ` · ${n} ${esc(T(n === 1 ? "Auftrag" : "Aufträge"))}` : ""}</small></button>`;
   }).join("") + `<button class="chip ${gpu.adding ? "act" : ""}" type="button" id="gpuAdd" title="${esc(T("Weitere Cloud-GPU mieten – sie arbeitet gleichzeitig mit den anderen."))}">＋ ${esc(T("Weitere GPU"))}<small>${esc(T("gleichzeitig arbeiten"))}</small></button>`;
   el.innerHTML = `<div class="chips" id="gpuChips" style="margin-bottom:8px">${chipsHtml}</div>
     ${gpu.adding ? "" : `<div class="row" style="flex-wrap:wrap;gap:8px"><span class="bdg rent">🚀 GPU ${i.slot}${hw.pretty ? " · " + esc(hw.pretty) : ""}${hw.per_hour ? " · " + usd(hw.per_hour) + "/Std." : ""}</span><span class="hint">${esc(STAGE_TXT[i.stage] || i.stage || "")}</span>
@@ -1270,7 +1352,7 @@ function renderGpuBar(){
   bindGpuMoney();
   if($("#gpuPause")) $("#gpuPause").onclick = () => rentedAction(i.id, "pause");
   if($("#gpuStart")) $("#gpuStart").onclick = () => rentedAction(i.id, "start");
-  $("#gpuAuto").onchange = e => setPauseAfter(e.target.checked);   // greift, wenn der letzte Auftrag einer GPU fertig ist
+  $("#gpuAuto").onchange = e => { setPauseAfter(e.target.checked); if(!e.target.checked){ autoPauseArmed.forEach(b => clearTimeout(autoPauseT[b])); autoPauseArmed.clear(); } };   // greift, wenn der letzte Auftrag einer GPU fertig ist
   $("#gpuRef").onclick = async () => { gpu.list = null; renderGpuBar(); refreshGpuMoney(true); };
   if($("#gpuUpd")) $("#gpuUpd").onclick = async () => { $("#gpuUpd").disabled = true; const r = await api("/easy/cloud/comfy/update", { slot: i.slot }); if(r.error) toast("❌ " + esc(r.error), "err"); else toast("✅ " + esc(T("Wird aktualisiert – die Cloud-GPU richtet sich in einigen Minuten neu ein.")), "ok"); gpu.list = null; renderGpuBar(); };
 }
