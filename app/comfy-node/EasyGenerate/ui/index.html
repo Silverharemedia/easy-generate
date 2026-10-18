@@ -771,6 +771,7 @@ async function generate(){
   if($("#seedRand").checked){ seed = Math.floor(Math.random() * 2 ** 48); $("#seed").value = seed; }
   else seed = Math.max(0, parseInt($("#seed").value || "0", 10));
   const B = state.compute[k] === "gpu" ? "/easy/remote" : "";
+  state.submitting = !!B; clearTimeout(autoPauseT);
   try{
     if(B && !(await gpuPrepare(key))) return;
     const names = {};
@@ -793,6 +794,7 @@ async function generate(){
     } else startJob(job);
     updateGo();
   }catch(e){ if(!state.run) $("#progBox").classList.add("hidden"); updateGo(); renderQueue(); if(queued) toast("❌ " + esc(T(friendly(gpuErr(String(e.message || e))))), "err", 8000); else showMsg("err", friendly(gpuErr(String(e.message || e)))); }
+  finally{ if(state.submitting){ state.submitting = false; if(B) maybeAutoPause(); } }
 }
 function tick(){
   const run = state.run; if(!run) return;
@@ -889,7 +891,23 @@ async function restoreJobs(){
   startJob(Object.assign(keep[0], { rpSeq: null }), true);
   updateGo();
 }
-function fail(text){ endRun(); showMsg(text === "Abgebrochen." ? "warn" : "err", text); }
+function fail(text){ const wasB = state.run && state.run.B; endRun(); showMsg(text === "Abgebrochen." ? "warn" : "err", text); if(wasB) maybeAutoPause(); }
+// ☕ Nach der Warteschlange die Cloud-GPU sofort pausieren (erst wenn alle Ergebnisse abgeholt sind)
+let autoPauseT = null;
+function gpuBusy(){ return gpuPrep.active || state.submitting || [state.run, ...state.queue].some(j => j && j.B); }
+function maybeAutoPause(){
+  if(!store.get("gpuPauseAfter", false) || gpuBusy()) return;
+  clearTimeout(autoPauseT);
+  autoPauseT = setTimeout(async () => {
+    if(!store.get("gpuPauseAfter", false) || gpuBusy()) return;   // inzwischen neuer Auftrag? Dann nicht pausieren
+    const info = gpu.info || await loadGpuInfo();
+    if(!info || !info.exists || !info.id || ["PAUSED", "SLEEPING", "STOPPED"].includes(info.stage)) return;
+    const r = await api("/easy/cloud/rented/pause", { space: info.id });
+    if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
+    toast("☕ " + esc(T("Warteschlange fertig – Cloud-GPU pausiert. Es entstehen keine Kosten mehr.")), "ok", 10000);
+    gpu.info = null; if(state.tab === "video" || state.tab === "image") renderStudio();
+  }, 4000);
+}
 async function finish(){
   const run = state.run; if(!run || run.finished) return;
   run.finished = true; $("#bar").style.width = "100%"; $("#progTxt").textContent = "Fertig – lade Ergebnis …";
@@ -907,6 +925,7 @@ async function finish(){
   if(run.B){
     showMsg("ok", "Fertig – hole das Ergebnis von der Cloud-GPU …");
     const fr = await api("/easy/cloud/comfy/fetch", { files, model: tool ? tool.title : run.key, kind: run.kind, prompt: run.prompt ?? $("#prompt").value.trim() });
+    maybeAutoPause();
     if(!fr.files || !fr.files.length){ showMsg("err", "Das Ergebnis konnte nicht von der Cloud-GPU geholt werden."); return; }
     files = fr.files;
     setTimeout(() => refreshGpuMoney(true), 5000);   // Guthaben nach dem Erstellen auffrischen
@@ -1083,10 +1102,12 @@ function renderGpuBar(){
   el.innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px"><span class="bdg rent">🚀 Cloud-GPU${hw.pretty ? " · " + esc(hw.pretty) : ""}${hw.per_hour ? " · " + usd(hw.per_hour) + "/Std." : ""}</span><span class="hint">${esc(ST[i.stage] || i.stage || "")}</span>
     ${i.needs_update ? `<button class="btn" type="button" id="gpuUpd" style="font-size:12px;padding:4px 10px">⬆ Cloud-GPU auf ${esc(i.version)} aktualisieren</button>` : ""}
     ${i.stage === "RUNNING" || /STARTING|BUILDING/.test(i.stage || "") ? `<button class="btn" type="button" id="gpuPause" style="font-size:12px;padding:4px 10px">⏸ Pausieren</button>` : ["PAUSED", "SLEEPING", "STOPPED"].includes(i.stage) ? `<button class="btn" type="button" id="gpuStart" style="font-size:12px;padding:4px 10px">▶ Starten</button>` : ""}
-    <button class="btn" type="button" id="gpuRef" style="font-size:12px;padding:4px 10px" title="Aktualisieren">↻</button></div>
+    <button class="btn" type="button" id="gpuRef" style="font-size:12px;padding:4px 10px" title="Aktualisieren">↻</button>
+    <label class="row hint" style="gap:6px;color:var(--text);cursor:pointer" title="Sobald alle Videos in der Warteschlange fertig und abgeholt sind, wird die Cloud-GPU sofort pausiert – ohne die Wartezeit bis zum automatischen Ausschalten."><input type="checkbox" id="gpuAuto" ${store.get("gpuPauseAfter", false) ? "checked" : ""}> <span>☕ Pausieren, wenn die Warteschlange fertig ist</span></label></div>
     <div class="row" id="gpuMoney" style="flex-wrap:wrap;gap:8px;margin-top:6px">${gpuMoneyHtml(hw)}</div>`;
   bindGpuMoney();
   if($("#gpuPause")) $("#gpuPause").onclick = () => rentedAction(i.id, "pause");
+  $("#gpuAuto").onchange = e => { store.set("gpuPauseAfter", e.target.checked); if(e.target.checked) maybeAutoPause(); };
   if($("#gpuStart")) $("#gpuStart").onclick = () => rentedAction(i.id, "start");
   $("#gpuRef").onclick = async () => { gpu.info = null; renderGpuBar(); refreshGpuMoney(true); };
   if($("#gpuUpd")) $("#gpuUpd").onclick = async () => { $("#gpuUpd").disabled = true; const r = await api("/easy/cloud/comfy/update", {}); if(r.error) toast("❌ " + esc(r.error), "err"); else toast("✅ " + esc(T("Wird aktualisiert – die Cloud-GPU richtet sich in einigen Minuten neu ein.")), "ok"); gpu.info = null; renderGpuBar(); };
