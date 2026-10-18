@@ -839,6 +839,7 @@ async function finish(){
     const fr = await api("/easy/cloud/comfy/fetch", { files, model: tool ? tool.title : run.key, kind: run.kind, prompt: $("#prompt").value.trim() });
     if(!fr.files || !fr.files.length){ showMsg("err", "Das Ergebnis konnte nicht von der Cloud-GPU geholt werden."); return; }
     files = fr.files; closeRemoteWS();
+    setTimeout(() => refreshGpuMoney(true), 5000);   // Guthaben nach dem Erstellen auffrischen
   } else files = await toGallery(files, tool ? tool.title : run.key, run.kind, $("#prompt").value.trim());
   showResult(files);
   showMsg("ok", `Fertig in ${fmtTime(secs)} Min.`);
@@ -1008,12 +1009,54 @@ function renderGpuBar(){
   el.innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px"><span class="bdg rent">🚀 Cloud-GPU${hw.pretty ? " · " + esc(hw.pretty) : ""}${hw.per_hour ? " · " + usd(hw.per_hour) + "/Std." : ""}</span><span class="hint">${esc(ST[i.stage] || i.stage || "")}</span>
     ${i.needs_update ? `<button class="btn" type="button" id="gpuUpd" style="font-size:12px;padding:4px 10px">⬆ Cloud-GPU auf ${esc(i.version)} aktualisieren</button>` : ""}
     ${i.stage === "RUNNING" || /STARTING|BUILDING/.test(i.stage || "") ? `<button class="btn" type="button" id="gpuPause" style="font-size:12px;padding:4px 10px">⏸ Pausieren</button>` : ["PAUSED", "SLEEPING", "STOPPED"].includes(i.stage) ? `<button class="btn" type="button" id="gpuStart" style="font-size:12px;padding:4px 10px">▶ Starten</button>` : ""}
-    <button class="btn" type="button" id="gpuRef" style="font-size:12px;padding:4px 10px" title="Aktualisieren">↻</button></div>`;
+    <button class="btn" type="button" id="gpuRef" style="font-size:12px;padding:4px 10px" title="Aktualisieren">↻</button></div>
+    <div class="row" id="gpuMoney" style="flex-wrap:wrap;gap:8px;margin-top:6px">${gpuMoneyHtml(hw)}</div>`;
+  bindGpuMoney();
   if($("#gpuPause")) $("#gpuPause").onclick = () => rentedAction(i.id, "pause");
   if($("#gpuStart")) $("#gpuStart").onclick = () => rentedAction(i.id, "start");
-  $("#gpuRef").onclick = async () => { gpu.info = null; renderGpuBar(); };
+  $("#gpuRef").onclick = async () => { gpu.info = null; renderGpuBar(); refreshGpuMoney(true); };
   if($("#gpuUpd")) $("#gpuUpd").onclick = async () => { $("#gpuUpd").disabled = true; const r = await api("/easy/cloud/comfy/update", {}); if(r.error) toast("❌ " + esc(r.error), "err"); else toast("✅ " + esc(T("Wird aktualisiert – die Cloud-GPU richtet sich in einigen Minuten neu ein.")), "ok"); gpu.info = null; renderGpuBar(); };
 }
+// Guthaben direkt im Studio (Cloud-GPU)
+function gpuMoneyHtml(hw){
+  const a = cloud.acct;
+  if(!a){ if(!gpu.acctLoading) refreshGpuMoney(false); return `<span class="hint">💰 Lese Guthaben …</span>`; }
+  if(!a.token_set || a.error) return "";
+  const w = cloud.wallet, us = a.usage, av = availableRaw();
+  const parts = [];
+  if(w && typeof w.balance === "number"){
+    parts.push(`<span class="bdg pay">💰 <span>Guthaben</span> <b>${usd(av ? av.v : w.balance)}</b></span>`);
+    if(hw && hw.per_hour && av){
+      const hrs = av.v / hw.per_hour;
+      parts.push(av.v > 0.01 ? `<span class="hint"><span>reicht für</span> ≈ <b>${hrs >= 10 ? Math.floor(hrs) : hrs.toFixed(1).replace(".", ",")}</b> <span>Std. auf dieser GPU</span></span>`
+        : `<span class="msg warn" style="margin:0;padding:4px 10px">Kein Guthaben mehr – bei HuggingFace aufladen.</span>`);
+    }
+  } else if(host && host.hfLogin) parts.push(`<button class="btn" type="button" id="gpuLogin" style="font-size:12px;padding:4px 10px">💰 Guthaben anzeigen (bei HuggingFace anmelden)</button>`);
+  else parts.push(extLink(HFL.billing, "💰 Guthaben ansehen", "btn"));
+  if(us && typeof us.total === "number") parts.push(`<span class="hint"><span>Diesen Monat verbraucht:</span> <b>${usd(us.total)}</b></span>`);
+  parts.push(`<a class="btn" href="${esc(HFL.billing)}" target="_blank" rel="noopener" style="font-size:12px;padding:4px 10px">💳 Aufladen</a>`);
+  return parts.join("");
+}
+function bindGpuMoney(){
+  if($("#gpuLogin")) $("#gpuLogin").onclick = async () => { $("#gpuLogin").disabled = true; await host.hfLogin(); $("#gpuLogin").textContent = T("Lese Guthaben …"); cloud.wallet = await host.hfWallet(); drawGpuMoney(); };
+}
+function drawGpuMoney(){
+  const el = $("#gpuMoney"); if(!el || !gpu.info) return;
+  const i = gpu.info, hw = ((cloud.hw || []).find(h => h.name === (i.current || i.hardware)) || {});
+  el.innerHTML = gpuMoneyHtml(hw); bindGpuMoney();
+}
+async function refreshGpuMoney(force){
+  if(gpu.acctLoading) return;
+  gpu.acctLoading = true;
+  try{ await loadAccount(force); }catch(e){}
+  gpu.acctLoading = false;
+  drawGpuMoney();
+}
+// alle 60 Sekunden auffrischen, solange das Studio im Cloud-GPU-Modus offen ist
+setInterval(() => {
+  if(document.hidden || !(state.tab === "video" || state.tab === "image") || state.compute[state.kind] !== "gpu" || !$("#gpuMoney")) return;
+  refreshGpuMoney(true);
+}, 60000);
 // Pausieren / Starten direkt aus dem Studio
 async function rentedAction(id, act){
   if(act === "pause" && (state.run || cloud.run) && !confirm(T("Gerade wird etwas erstellt. Trotzdem pausieren? Der Auftrag geht dabei verloren."))) return;
