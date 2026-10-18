@@ -558,8 +558,19 @@ async def _run_job(j, spec):
     r = await run_worker(spec, on_line=on, timeout=3600)
     j["finished"] = time.time()
     if r.get("type") == "result":
+        from . import gallery
+        files = []
+        for f in r.get("files", []):
+            src = os.path.join(out_dir(), f)
+            try:
+                t = await asyncio.to_thread(gallery.place, src, spec.get("title") or j["label"], spec.get("kind") or "",
+                                            spec.get("prompt") or "", "cloud")
+                ref = gallery.file_ref(t)
+            except Exception:
+                ref = None
+            files.append(dict(ref, name=os.path.basename(t)) if ref else {"filename": f, "subfolder": SUB, "type": "output"})
+        j["files"] = files
         j["state"] = "done"
-        j["files"] = [{"filename": f, "subfolder": SUB, "type": "output"} for f in r.get("files", [])]
         if spec.get("op") == "provider":
             asyncio.ensure_future(_learn_cost(spec["model"], before, j.get("units", 0)))
     else:
@@ -624,6 +635,9 @@ async def cloud_run(request):
             await _wake(sid)
     else:
         return web.json_response({"error": "Unbekannter Modus"}, status=400)
+    spec["title"] = str(data.get("title") or label)[:80]
+    spec["kind"] = "image" if data.get("kind") == "image" else "video"
+    spec.setdefault("prompt", str(data.get("prompt_text") or ""))
     jid = uuid.uuid4().hex[:12]
     j = {"id": jid, "mode": mode, "label": label, "state": "running", "started": time.time(), "units": units,
          "status": {"stage": "start"}}

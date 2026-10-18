@@ -15,7 +15,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -860,6 +860,130 @@ def ensure_gpu_reader():
         threading.Thread(target=_gpu_reader, daemon=True).start()
 
 
+# Temperaturen: GPU wie im Task-Manager (D3DKMT, ohne Adminrechte); CPU ueber LibreHardwareMonitor/
+# OpenHardwareMonitor (falls die laufen, sehr genau) oder den ACPI-Temperaturfuehler des Mainboards.
+TEMP_STAT = {"data": {}, "started": False}
+PS_TEMP = r"""
+$ErrorActionPreference='SilentlyContinue'
+$kmt = $false
+try {
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices; using System.Collections.Generic;
+public static class EGTemp {
+  [StructLayout(LayoutKind.Sequential)] public struct LUID { public uint Low; public int High; }
+  [StructLayout(LayoutKind.Sequential)] public struct ADAPTERINFO { public uint hAdapter; public LUID AdapterLuid; public uint NumOfSources; public int bPrecisePresentRegionsPreferred; }
+  [StructLayout(LayoutKind.Sequential)] public struct ENUMADAPTERS2 { public uint NumAdapters; public IntPtr pAdapters; }
+  [StructLayout(LayoutKind.Sequential)] public struct QUERYADAPTERINFO { public uint hAdapter; public int Type; public IntPtr pPrivateDriverData; public uint PrivateDriverDataSize; }
+  [StructLayout(LayoutKind.Sequential)] public struct PERFDATA { public uint PhysicalAdapterIndex; public ulong MemoryFrequency; public ulong MaxMemoryFrequency; public ulong MaxMemoryFrequencyOC; public ulong MemoryBandwidth; public ulong PCIEBandwidth; public uint FanRPM; public uint Power; public ulong Temperature; public byte PowerStateOverride; }
+  [DllImport("gdi32.dll")] static extern int D3DKMTEnumAdapters2(ref ENUMADAPTERS2 p);
+  [DllImport("gdi32.dll")] static extern int D3DKMTQueryAdapterInfo(ref QUERYADAPTERINFO p);
+  static List<uint> handles = null;
+  public static void Open() {
+    handles = new List<uint>();
+    var e = new ENUMADAPTERS2();
+    if (D3DKMTEnumAdapters2(ref e) != 0 || e.NumAdapters == 0) return;
+    int sz = Marshal.SizeOf(typeof(ADAPTERINFO));
+    e.pAdapters = Marshal.AllocHGlobal(sz * (int)e.NumAdapters);
+    if (D3DKMTEnumAdapters2(ref e) == 0) {
+      for (int i = 0; i < e.NumAdapters; i++) { var a = (ADAPTERINFO)Marshal.PtrToStructure(new IntPtr(e.pAdapters.ToInt64() + i * sz), typeof(ADAPTERINFO)); handles.Add(a.hAdapter); }
+    }
+    Marshal.FreeHGlobal(e.pAdapters);
+  }
+  // hoechste gemeldete GPU-Temperatur in Grad Celsius (wie im Task-Manager), sonst -1; fan = Luefter-Drehzahl
+  public static double Read(out uint fan) {
+    fan = 0; if (handles == null) Open();
+    double best = -1;
+    foreach (var h in handles) {
+      var pd = new PERFDATA(); int sz = Marshal.SizeOf(typeof(PERFDATA));
+      IntPtr p = Marshal.AllocHGlobal(sz); Marshal.StructureToPtr(pd, p, false);
+      var q = new QUERYADAPTERINFO { hAdapter = h, Type = 62, pPrivateDriverData = p, PrivateDriverDataSize = (uint)sz };
+      if (D3DKMTQueryAdapterInfo(ref q) == 0) {
+        pd = (PERFDATA)Marshal.PtrToStructure(p, typeof(PERFDATA));
+        double t = pd.Temperature / 10.0;
+        if (t > 1 && t < 150 && t > best) { best = t; fan = pd.FanRPM; }
+      }
+      Marshal.FreeHGlobal(p);
+    }
+    return best;
+  }
+}
+"@
+$kmt = $true } catch { $kmt = $false }
+function LhmTemps {
+  foreach ($ns in 'root/LibreHardwareMonitor','root/OpenHardwareMonitor') {
+    $s = @(Get-CimInstance -Namespace $ns -ClassName Sensor -Filter "SensorType='Temperature'" -ErrorAction SilentlyContinue)
+    if ($s.Count) {
+      $cpu = $s | Where-Object { $_.Parent -match 'cpu' -and $_.Name -match 'Package|Tctl|Tdie|Core \(|CPU' } | Sort-Object Value -Descending | Select-Object -First 1
+      $gpu = $s | Where-Object { $_.Parent -match 'gpu' -and $_.Name -match 'Core|GPU' -and $_.Name -notmatch 'Memory' } | Sort-Object Value -Descending | Select-Object -First 1
+      return @{ cpu = $cpu.Value; gpu = $gpu.Value }
+    }
+  }
+  return $null
+}
+function AcpiTemp {
+  $z = @(Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction SilentlyContinue)
+  $m = -1
+  foreach ($x in $z) { $k = if ($x.HighPrecisionTemperature) { $x.HighPrecisionTemperature / 10.0 } else { [double]$x.Temperature }; $c = $k - 273.15; if ($c -gt $m) { $m = $c } }
+  if ($m -lt 5 -or $m -gt 120) {
+    $w = @(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue)
+    foreach ($x in $w) { $c = $x.CurrentTemperature / 10.0 - 273.15; if ($c -gt $m) { $m = $c } }
+  }
+  if ($m -lt 5 -or $m -gt 120) { return $null } else { return [math]::Round($m, 1) }
+}
+$n = 0; $lhm = $null
+while ($true) {
+  $o = [ordered]@{ cpu = $null; cpu_src = ''; gpu = $null; gpu_src = ''; fan = $null }
+  if ($n % 5 -eq 0) { $lhm = LhmTemps }
+  if ($lhm -and $lhm.cpu) { $o.cpu = [math]::Round([double]$lhm.cpu, 1); $o.cpu_src = 'lhm' }
+  if ($lhm -and $lhm.gpu) { $o.gpu = [math]::Round([double]$lhm.gpu, 1); $o.gpu_src = 'lhm' }
+  if (-not $o.cpu) { $a = AcpiTemp; if ($a) { $o.cpu = $a; $o.cpu_src = 'acpi' } }
+  if (-not $o.gpu -and $kmt) { $f = [uint32]0; try { $t = [EGTemp]::Read([ref]$f); if ($t -gt 0) { $o.gpu = [math]::Round($t, 1); $o.gpu_src = 'kmt'; if ($f -gt 0) { $o.fan = $f } } } catch { $kmt = $false } }
+  [Console]::Out.WriteLine(($o | ConvertTo-Json -Compress)); [Console]::Out.Flush()
+  $n++; Start-Sleep -Seconds 3
+}
+"""
+
+
+def _temp_reader():
+    try:
+        if os.name == "nt":
+            import base64
+            enc = base64.b64encode(PS_TEMP.encode("utf-16-le")).decode()   # sicher gegen Anfuehrungszeichen
+            p = subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, creationflags=0x08000000)
+            for line in p.stdout:
+                try:
+                    TEMP_STAT["data"] = json.loads(line)
+                except ValueError:
+                    pass
+        else:
+            import psutil
+            while True:
+                d = {}
+                try:
+                    t = psutil.sensors_temperatures()
+                    for k in ("k10temp", "coretemp", "zenpower", "cpu_thermal"):
+                        if t.get(k):
+                            d["cpu"], d["cpu_src"] = max(x.current for x in t[k]), "sensor"
+                            break
+                    for k in ("amdgpu", "nouveau", "nvidia"):
+                        if t.get(k):
+                            d["gpu"], d["gpu_src"] = max(x.current for x in t[k]), "sensor"
+                            break
+                except Exception:
+                    pass
+                TEMP_STAT["data"] = d
+                time.sleep(3)
+    except Exception:
+        pass
+
+
+def ensure_temp_reader():
+    if not TEMP_STAT["started"]:
+        TEMP_STAT["started"] = True
+        threading.Thread(target=_temp_reader, daemon=True).start()
+
+
 PS_SPECS = r"""
 $ErrorActionPreference='SilentlyContinue'
 $c = Get-CimInstance Win32_Processor | Select-Object -First 1
@@ -922,7 +1046,9 @@ async def easy_specs(request):
 @routes.get("/easy/sysinfo")
 async def easy_sysinfo(request):
     ensure_gpu_reader()
-    out = {"cpu": None, "ram_used": None, "ram_total": None, "gpu": GPU_STAT["util"], "vram_used": None, "vram_total": None, "gpu_name": ""}
+    ensure_temp_reader()
+    td = TEMP_STAT["data"] or {}
+    out = {"cpu_temp": td.get("cpu"), "cpu_temp_src": td.get("cpu_src"), "gpu_temp": td.get("gpu"), "gpu_fan": td.get("fan"), "cpu": None, "ram_used": None, "ram_total": None, "gpu": GPU_STAT["util"], "vram_used": None, "vram_total": None, "gpu_name": ""}
     try:
         import psutil
         out["cpu"] = psutil.cpu_percent(interval=None)
@@ -990,6 +1116,10 @@ async def easy_ollama_pull_status(request):
     return web.json_response(OLLAMA_PULL)
 
 
+try:
+    from . import gallery  # noqa: F401  (Galerie mit Modell-Zuordnung)
+except Exception as _e:
+    print("[Easy Generate] Galerie-Modul nicht geladen:", _e)
 try:
     from . import cloud  # noqa: F401  (registriert die Cloud-Routen)
 except Exception as _e:

@@ -609,6 +609,23 @@
     ["Space nicht gefunden.", "Space not found.", "Space не найден."],
     ["Gemietete Spaces sind privat. Damit Easy Generate sie benutzen darf, braucht es den Space-Schlüssel mit Leserecht.", "Rented Spaces are private. For Easy Generate to use them, it needs the Space token with read access.", "Арендованные Spaces приватны. Чтобы Easy Generate мог их использовать, нужен токен для Spaces с правом чтения."],
     ["→ ☁️ Cloud → „Gratis-Kontingent deines Kontos nutzen“ → Schlüssel anlegen (mit dem Haken „Read access to contents of all repos under your personal namespace“).", "→ ☁️ Cloud → “Use your account's free quota” → create the token (with the box “Read access to contents of all repos under your personal namespace” ticked).", "→ ☁️ Облако → «Использовать бесплатную квоту аккаунта» → создай токен (с галочкой «Read access to contents of all repos under your personal namespace»)."],
+    // Galerie & Speicherort
+    ["Deine Videos und Bilder – sortiert nach Modell", "Your videos and images – sorted by model", "Твои видео и изображения – по моделям"],
+    ["Ändern", "Change", "Изменить"], ["📂 Gespeichert in:", "📂 Stored in:", "📂 Хранится в:"], ["Gespeichert in:", "Stored in:", "Хранится в:"], ["Ordner öffnen", "Open folder", "Открыть папку"],
+    ["Alle Modelle", "All models", "Все модели"], ["Ohne Zuordnung", "Unassigned", "Без привязки"], ["Im Ordner zeigen", "Show in folder", "Показать в папке"],
+    ["Diese Datei endgültig löschen?", "Delete this file permanently?", "Удалить этот файл навсегда?"],
+    ["📁 Wo sollen deine Videos und Bilder gespeichert werden?", "📁 Where should your videos and images be stored?", "📁 Где хранить твои видео и изображения?"],
+    ["Das kannst du jederzeit in der Galerie oder in den Einstellungen ändern.", "You can change this at any time in the gallery or the settings.", "Это можно изменить в любой момент в галерее или настройках."],
+    ["In einem eigenen Ordner (empfohlen)", "In a folder of your choice (recommended)", "В отдельной папке (рекомендуется)"],
+    ["Nach Modellen sortiert in Unterordnern. Die Dateien liegen dort schon – herunterladen ist nicht nötig, also kein doppelter Speicherplatz.", "Sorted into subfolders by model. The files are already there – no need to download, so no double storage.", "Рассортировано по подпапкам моделей. Файлы уже там – скачивать не нужно, место не занимается дважды."],
+    ["z. B. D:\\Videos\\Easy Generate", "e.g. D:\\Videos\\Easy Generate", "напр. D:\\Videos\\Easy Generate"], ["Wählen …", "Choose …", "Выбрать …"],
+    ["Im ComfyUI-Ausgabeordner (wie bisher)", "In the ComfyUI output folder (as before)", "В папке вывода ComfyUI (как раньше)"], ["Keine Galerie", "No gallery", "Без галереи"],
+    ["Bitte einen Ordner angeben.", "Please enter a folder.", "Укажи папку."], ["Verschiebe Dateien …", "Moving files …", "Перемещаю файлы …"],
+    ["📂 Im Ordner zeigen", "📂 Show in folder", "📂 Показать в папке"], ["Kopie speichern unter …", "Save a copy as …", "Сохранить копию как …"],
+    ["Schon gespeichert im Galerie-Ordner – Herunterladen ist nicht nötig.", "Already saved in the gallery folder – no need to download.", "Уже сохранено в папке галереи – скачивать не нужно."],
+    ["📁 Galerie / Speicherort", "📁 Gallery / storage location", "📁 Галерея / место хранения"], ["(nach Modellen sortiert)", "(sorted by model)", "(по моделям)"],
+    ["(Mainboard-Fühler)", "(motherboard sensor)", "(датчик материнской платы)"],
+    ["Windows gibt die CPU-Temperatur ohne Zusatzprogramm meist nicht heraus. Läuft LibreHardwareMonitor, zeigt Easy Generate sie hier an.", "Windows usually doesn't report the CPU temperature without an extra tool. If LibreHardwareMonitor is running, Easy Generate shows it here.", "Windows обычно не сообщает температуру CPU без дополнительной программы. Если запущен LibreHardwareMonitor, Easy Generate покажет её здесь."],
   ];
   for (const [de, en, ru] of CLOUD) { EN[de] = en; RU[de] = ru; }
   const tTask = s => ({ "Text → Video": ["Text → Video", "Текст → Видео"], "Bild → Video": ["Image → Video", "Изображение → Видео"], "Text → Bild": ["Text → Image", "Текст → Изображение"], "Bild bearbeiten": ["Edit image", "Редактировать"] }[s] || [s, s])[lang === "ru" ? 1 : 0];
@@ -642,6 +659,15 @@
     [/^Fertig in (.+) Min\. · Kosten ca\. (\$[\d.]+) \(wird von deinem HuggingFace-Guthaben abgebucht\)$/, (m, t, c) => L(`Done in ${t} min. · cost approx. ${c} (deducted from your HuggingFace credit)`, `Готово за ${t} мин. · стоимость около ${c} (списывается с баланса HuggingFace)`)],
     [/^Space nicht gefunden \((\d+)\)\.$/, (m, a) => L(`Space not found (${a}).`, `Space не найден (${a}).`)],
     [/^(?!Schritt )([^:]{1,40}): (\d+) von (\d+)$/, (m, a, x, y) => `${a}: ${x} ${L("of", "из")} ${y}`],
+    [/^🗑 Keine Galerie – Ergebnisse werden nach (\d+) Std\. gelöscht\.$/, (m, h) => L(`🗑 No gallery – results are deleted after ${h} h.`, `🗑 Без галереи – результаты удаляются через ${h} ч.`)],
+    [/^Keine Galerie – Ergebnisse werden nach (\d+) Std\. gelöscht\.$/, (m, h) => L(`No gallery – results are deleted after ${h} h.`, `Без галереи – результаты удаляются через ${h} ч.`)],
+    [/^· (\d+) Dateien · (.+)$/, (m, n, g) => L(`· ${n} files · ${g}`, `· файлов: ${n} · ${g.replace("GB", "ГБ")}`)],
+    [/^Du lädst jedes Ergebnis selbst herunter\. Was nicht heruntergeladen wird, löscht Easy Generate nach (\d+) Std\.$/, (m, h) => L(`You download each result yourself. Anything not downloaded is deleted by Easy Generate after ${h} h.`, `Ты сам скачиваешь каждый результат. Всё, что не скачано, Easy Generate удаляет через ${h} ч.`)],
+    [/^Bisherige Ergebnisse \((\d+) Dateien, (.+)\) in den neuen Ordner verschieben$/, (m, n, g) => L(`Move previous results (${n} files, ${g}) to the new folder`, `Переместить прежние результаты (файлов: ${n}, ${g}) в новую папку`)],
+    [/^✅ (\d+) Dateien verschoben\.$/, (m, n) => L(`✅ ${n} files moved.`, `✅ Перемещено файлов: ${n}.`)],
+    [/^Ordner nicht beschreibbar: (.+)$/, (m, e) => L("Folder not writable: ", "Нет доступа на запись в папку: ") + e],
+    [/^Hinweis: Ohne Galerie wird das Ergebnis nach (\d+) Std\. gelöscht – jetzt herunterladen\.$/, (m, h) => L(`Note: without a gallery, the result is deleted after ${h} h – download it now.`, `Внимание: без галереи результат удаляется через ${h} ч – скачай его сейчас.`)],
+    [/^· Lüfter (\d+) U\/min$/, (m, n) => L(`· fan ${n} rpm`, `· вентилятор ${n} об/мин`)],
     [/^ca\. (.+)$/, (m, a) => L("approx. ", "около ") + tr(a)],
   );
 

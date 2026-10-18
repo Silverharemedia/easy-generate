@@ -23,7 +23,7 @@ const PACKAGES = {
 };
 const RELEASE_BASE = "https://github.com/comfyanonymous/ComfyUI/releases/latest/download/";
 
-let win = null, cfg = null, quitting = false, comfyChild = null;
+let win = null, cfg = null, quitting = false, comfyChild = null, updateReady = false;
 
 // ------------------------------------------------------------------ Konfiguration
 function loadCfg() {
@@ -293,7 +293,7 @@ function initUpdater() {
     updater.autoInstallOnAppQuit = true;
     updater.on("update-available", i => send("app:update", { status: "available", version: i.version }));
     updater.on("download-progress", p => send("app:update", { status: "progress", percent: p.percent }));
-    updater.on("update-downloaded", i => send("app:update", { status: "ready", version: i.version }));
+    updater.on("update-downloaded", i => { updateReady = true; send("app:update", { status: "ready", version: i.version }); });
     updater.on("error", e => send("app:update", { status: "error", message: String(e && e.message || e) }));
     setTimeout(() => updater.checkForUpdates().catch(() => {}), 8000);
   } catch (e) { updater = null; }
@@ -320,6 +320,15 @@ async function updateComfy() {
 }
 
 // ------------------------------------------------------------------ Fenster
+function forceQuit() {
+  // win.close() wartet auf die Seite; nach einem Treiber-Absturz antwortet sie evtl. nie mehr.
+  // Deshalb hart beenden: Fenster zerstören und Prozess verlassen.
+  quitting = true;
+  if (updateReady && updater) { try { setTimeout(() => app.exit(0), 8000).unref(); updater.quitAndInstall(true, false); return; } catch (e) {} }   // geladenes Update beim Beenden installieren
+  try { for (const w of BrowserWindow.getAllWindows()) w.destroy(); } catch (e) {}
+  setTimeout(() => process.exit(0), 3000).unref();
+  app.exit(0);
+}
 function createWindow() {
   win = new BrowserWindow({
     width: 1400, height: 920, minWidth: 900, minHeight: 600, backgroundColor: "#0e1014", title: "Easy Generate",
@@ -332,9 +341,12 @@ function createWindow() {
     if (/^https?:\/\/(127\.0\.0\.1|localhost)/.test(url)) return { action: "allow", overrideBrowserWindowOptions: { autoHideMenuBar: true, icon: APP_ICON, backgroundColor: "#0e1014" } };
     shell.openExternal(url); return { action: "deny" };
   });
+  let closing = false;
   win.on("close", async e => {
     if (quitting) return;
     e.preventDefault();
+    if (closing) { forceQuit(); return; }               // zweiter Klick aufs Kreuz: sofort beenden
+    closing = true;
     let close = cfg.closeMode === "always";
     const running = cfg.comfy && await comfyAt(cfg.comfy.port);
     if (running && cfg.closeMode === "ask") {
@@ -350,10 +362,16 @@ function createWindow() {
       close = r.response === 0;
       if (close && r.checkboxChecked) { cfg.closeMode = "always"; saveCfg(); }
     }
-    if (running) await pauseRented();
-    if (running && close) await killComfy();
-    quitting = true; win.close(); app.quit();
+    // Aufräumen mit Zeitlimit – hängt etwas (z. B. nach einem Grafiktreiber-Absturz), wird trotzdem beendet
+    const cleanup = (async () => {
+      if (running) await pauseRented();
+      if (running && close) await killComfy();
+    })();
+    await Promise.race([cleanup, sleep(15000)]);
+    forceQuit();
   });
+  // Reagiert die Oberfläche nicht mehr (z. B. Grafiktreiber abgestürzt), kann man trotzdem schließen
+  win.on("unresponsive", () => { if (closing) forceQuit(); });
 }
 
 // ------------------------------------------------------------------ HuggingFace-Guthaben
@@ -413,13 +431,21 @@ async function pauseRented() {
   // Gemietete GPUs (eigene Spaces) beim Beenden pausieren, damit keine Kosten weiterlaufen.
   if (!cfg.comfy || !cfg.comfy.port) return;
   await new Promise(resolve => {
-    const req = http.request({ host: "127.0.0.1", port: cfg.comfy.port, path: "/easy/cloud/pause_all", method: "POST", headers: { "Content-Type": "application/json" }, timeout: 15000 }, res => { res.resume(); res.on("end", resolve); });
+    const req = http.request({ host: "127.0.0.1", port: cfg.comfy.port, path: "/easy/cloud/pause_all", method: "POST", headers: { "Content-Type": "application/json" }, timeout: 8000 }, res => { res.resume(); res.on("end", resolve); });
     req.on("error", resolve); req.on("timeout", () => { req.destroy(); resolve(); });
     req.end("{}");
   });
 }
 
 // ------------------------------------------------------------------ IPC
+ipcMain.handle("app:showItem", (e, p) => { try { if (typeof p === "string" && fs.existsSync(p)) shell.showItemInFolder(p); } catch (err) {} return true; });
+ipcMain.handle("app:openFolder", (e, p) => { try { if (typeof p === "string" && fs.existsSync(p) && fs.statSync(p).isDirectory()) shell.openPath(p); } catch (err) {} return true; });
+ipcMain.handle("app:chooseGalleryDir", async (e, start) => {
+  const T = { de: "Ordner für deine Videos und Bilder wählen", en: "Choose a folder for your videos and images", ru: "Выбери папку для видео и изображений" };
+  const r = await dialog.showOpenDialog(win, { title: T[cfg.lang] || T.de, defaultPath: start || app.getPath("videos"), properties: ["openDirectory", "createDirectory"] });
+  return r.canceled ? null : r.filePaths[0];
+});
+ipcMain.handle("app:defaultGalleryDir", () => path.join(app.getPath("videos"), "Easy Generate"));
 ipcMain.handle("app:hfWallet", () => hfWallet());
 ipcMain.handle("app:hfLogin", () => hfLogin());
 ipcMain.handle("app:hfLogout", () => hfLogout());

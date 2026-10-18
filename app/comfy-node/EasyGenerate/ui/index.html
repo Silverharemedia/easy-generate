@@ -104,6 +104,11 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
 .mc2 .k b{font-size:13px;color:var(--muted);font-weight:600}
 .mc2 .k span{font-size:20px;font-weight:700}
 .mc2 .s{font-size:12px;color:var(--muted);margin-top:2px}
+.mc2 .tmp{color:var(--text);opacity:.9;margin-top:3px}.mc2 .tmp b.hot{color:var(--err)}.mc2 .tmp b.warm{color:var(--warn)}
+.gsec{margin:18px 0 8px;display:flex;align-items:baseline;gap:10px}.gsec h3{margin:0;font-size:15px}
+.gal .meta .ac{display:flex;gap:8px;flex:none}.gal .meta .ac a,.gal .meta .ac button{background:none;border:0;color:var(--accent2);cursor:pointer;padding:0;font-size:12px;text-decoration:none}
+.gal .meta .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gopt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-top:8px;cursor:pointer}.gopt.act{border-color:var(--accent);background:#2a1b16}
 .mc2 .spec{color:var(--text);opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mc2 svg{width:100%;height:38px;display:block;margin-top:6px}
 .mc2 .mini{height:6px;background:var(--panel2);border-radius:9px;overflow:hidden;margin-top:6px}.mc2 .mini>div{height:100%;background:var(--accent2)}
@@ -242,7 +247,8 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
             <div class="actions" style="margin-top:10px"><button class="btn danger" id="stop">Abbrechen</button></div>
           </div>
           <div id="out"></div>
-          <div class="actions hidden" id="resActions"><a class="btn" id="dl" download>Herunterladen</a><button class="btn" id="again">Nochmal (neuer Seed)</button></div>
+          <div class="actions hidden" id="resActions"><button class="btn pri hidden" id="showDir" type="button">📂 Im Ordner zeigen</button><a class="btn" id="dl" download>Herunterladen</a><button class="btn" id="again">Nochmal (neuer Seed)</button></div>
+          <p class="hint" id="keptHint" style="margin:6px 0 0"></p>
         </div>
       </div>
     </div>
@@ -262,9 +268,11 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
 
   <!-- GALERIE -->
   <section id="gallery" class="hidden">
-    <h1>Galerie</h1><p class="sub">Deine zuletzt erstellten Videos und Bilder</p>
+    <h1>Galerie</h1><p class="sub">Deine Videos und Bilder – sortiert nach Modell</p>
+    <div class="row hint" id="galInfo" style="flex-wrap:wrap;margin:-6px 0 14px"></div>
     <div class="toolbar"><div class="chips" id="galFilter"></div><button class="btn" id="galReload" style="margin-left:auto">Aktualisieren</button></div>
-    <div class="gal" id="gal"></div>
+    <div class="chips" id="galModels" style="margin-bottom:6px"></div>
+    <div id="gal"></div><div id="galWrap"></div>
   </section>
 
   <!-- MODELLE -->
@@ -312,6 +320,11 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
           <button class="btn" id="cChange" type="button">Anderes ComfyUI wählen</button>
         </div>
         <div id="cMsg" style="margin-top:8px"></div>
+      </div>
+      <div class="card">
+        <h3>📁 Galerie / Speicherort</h3>
+        <div id="galSetInfo" class="hint"></div>
+        <div class="actions" style="margin-top:10px"><button class="btn" type="button" onclick="gallerySetup(true)">Ändern</button></div>
       </div>
       <div class="card" id="closeCard">
         <h3>Beim Schließen des Programms</h3>
@@ -368,9 +381,9 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
   </main>
   <aside class="mon" id="mon">
     <div class="hd"><span class="monT">System</span><button class="tog" id="monTog" type="button" title="Ein-/Ausklappen">⟩</button></div>
-    <div class="mc2"><div class="k"><b>CPU</b><span id="mCpu">–</span></div><div class="s spec" id="mCpuN">&nbsp;</div><div class="s" id="mCpuS"></div><svg id="sCpu" viewBox="0 0 100 38" preserveAspectRatio="none"></svg></div>
+    <div class="mc2"><div class="k"><b>CPU</b><span id="mCpu">–</span></div><div class="s spec" id="mCpuN">&nbsp;</div><div class="s" id="mCpuS"></div><div class="s tmp" id="mCpuT"></div><svg id="sCpu" viewBox="0 0 100 38" preserveAspectRatio="none"></svg></div>
     <div class="mc2"><div class="k"><b>RAM</b><span id="mRam">–</span></div><div class="s spec" id="mRamT">&nbsp;</div><div class="s" id="mRamS">&nbsp;</div><svg id="sRam" viewBox="0 0 100 38" preserveAspectRatio="none"></svg></div>
-    <div class="mc2"><div class="k"><b>GPU</b><span id="mGpu">–</span></div><div class="s" id="mGpuN">&nbsp;</div><svg id="sGpu" viewBox="0 0 100 38" preserveAspectRatio="none"></svg>
+    <div class="mc2"><div class="k"><b>GPU</b><span id="mGpu">–</span></div><div class="s" id="mGpuN">&nbsp;</div><div class="s tmp" id="mGpuT"></div><svg id="sGpu" viewBox="0 0 100 38" preserveAspectRatio="none"></svg>
       <div class="s" style="margin-top:8px">VRAM <span id="mVram">–</span></div><div class="mini"><div id="mVramB" style="width:0"></div></div></div>
   </aside>
 </div>
@@ -804,6 +817,8 @@ async function finish(){
   endRun();
   if(state.tab === "video" || state.tab === "image") renderEta();
   if(!files.length){ showMsg("warn", "Fertig, aber keine Ausgabe gefunden. Schau in den Ausgabe-Ordner."); return; }
+  const tool = state.installed.find(t => t.name === run.key);
+  files = await toGallery(files, tool ? tool.title : run.key, run.kind, $("#prompt").value.trim());
   showResult(files);
   showMsg("ok", `Fertig in ${fmtTime(secs)} Min.`);
 }
@@ -814,8 +829,10 @@ function mediaFiles(outputs){
   const outs = res.filter(f => (f.type || "output") === "output");
   return outs.length ? outs : res;
 }
-const isVideo = f => /\.(mp4|webm|mov|mkv)$/i.test(f.filename);
-const viewUrl = f => `/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder || "")}&type=${encodeURIComponent(f.type || "output")}`;
+const fname = f => f.name || f.filename || "";
+const isVideo = f => /\.(mp4|webm|mov|mkv)$/i.test(fname(f));
+const viewUrl = f => f.r ? `/easy/gallery/file?r=${encodeURIComponent(f.r)}&p=${encodeURIComponent(f.p)}` : `/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder || "")}&type=${encodeURIComponent(f.type || "output")}`;
+const dlUrl = f => f.r ? viewUrl(f) + "&dl=1" : viewUrl(f);
 function mediaEl(f, controls){
   const el = document.createElement(isVideo(f) ? "video" : "img");
   el.src = viewUrl(f);
@@ -828,8 +845,21 @@ function showResult(files){
   const vids = files.filter(isVideo), list = vids.length ? [vids[0]] : files;
   v.classList.toggle("multi", list.length > 1);
   for(const f of list){ const el = mediaEl(f, true); v.appendChild(el); if(isVideo(f)) el.play().catch(() => {}); }
-  $("#dl").href = viewUrl(list[0]); $("#dl").setAttribute("download", list[0].filename);
+  $("#dl").href = dlUrl(list[0]); $("#dl").setAttribute("download", fname(list[0]));
+  const own = gal.mode === "keep" && gal.own_dir && list[0].r;
+  $("#dl").textContent = own ? "Kopie speichern unter …" : "Herunterladen";
+  $("#showDir").classList.toggle("hidden", !(host && host.showItem && list[0].r));
+  $("#showDir").onclick = () => showInFolder(list[0]);
+  $("#keptHint").textContent = gal.mode === "temp" ? `Hinweis: Ohne Galerie wird das Ergebnis nach ${gal.temp_hours || 24} Std. gelöscht – jetzt herunterladen.` : own ? "Schon gespeichert im Galerie-Ordner – Herunterladen ist nicht nötig." : "";
   $("#resActions").classList.remove("hidden");
+}
+async function showInFolder(f){
+  const r = await api("/easy/gallery/path", { r: f.r, p: f.p });
+  if(r.path && host && host.showItem) host.showItem(r.path);
+}
+async function toGallery(files, model, kind, prompt){
+  try{ const r = await api("/easy/gallery/add", { files, model, kind, prompt }); if(r.files && r.files.length) return r.files; }catch(e){}
+  return files;
 }
 $("#go").onclick = generate;
 $("#again").onclick = () => {
@@ -1507,6 +1537,7 @@ async function cloudGenerate(){
     }
   }catch(e){ showMsg("err", String(e.message || e)); return; }
   $("#out").innerHTML = ""; $("#resActions").classList.add("hidden");
+  Object.assign(body, { title: s.title || s.id, kind: k, prompt_text: prompt });
   const r = await api("/easy/cloud/run", body);
   if(r.error){ showMsg("err", cloudErr(r.error)); return; }
   const h = etaHist[cloudKey(s)];
@@ -1565,36 +1596,99 @@ async function cloudCancel(){
 $("#cGo").onclick = cloudGenerate;
 
 /* ================= Galerie ================= */
-let galKind = "all";
+// Liest die Dateien direkt aus den Ordnern (bleibt nach Neustart erhalten) und gruppiert nach Modell.
+let galKind = "all", galModel = store.get("galModel", "all");
+const gal = { mode: "", own_dir: false, temp_hours: 24, items: [] };
+async function loadGalSettings(){ try{ const j = await api("/easy/gallery"); Object.assign(gal, j); }catch(e){} return gal; }
+const fmtDate = t => new Date(t * 1000).toLocaleString(undefined, { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 async function loadGallery(){
-  chips($("#galFilter"), [["all", { n: "Alle" }], ["video", { n: "Videos" }], ["image", { n: "Bilder" }]], galKind, k => { galKind = k; loadGallery(); });
   const g = $("#gal"); g.innerHTML = `<div class="hint">Lade …</div>`;
-  try{
-    const j = await (await fetch("/history?max_items=80", { cache: "no-store" })).json();
-    const all = [];
-    for(const h of Object.values(j).reverse()){
-      const msgs = (h.status && h.status.messages) || [];
-      const ts = Math.max(0, ...msgs.map(m => (m[1] && m[1].timestamp) || 0)) / 1000;
-      for(const f of mediaFiles(h.outputs)) if((f.type || "output") === "output") all.push(Object.assign({ t: ts }, f));
-    }
-    try{ const c = await api("/easy/cloud/gallery"); for(const f of c.items || []) all.push(Object.assign({ t: f.mtime, cloud: true }, f)); }catch(e){}
-    all.sort((a, b) => (b.t || 0) - (a.t || 0));
-    const items = [];
-    for(const f of all){
-      const v = isVideo(f) || /\.gif$/i.test(f.filename);
-      if(galKind === "all" || (galKind === "video") === v) items.push(f);
-    }
-    g.innerHTML = "";
-    if(!items.length){ g.innerHTML = `<div class="hint">Noch nichts erstellt.</div>`; return; }
-    for(const f of items){
+  let j;
+  try{ j = await api("/easy/gallery"); Object.assign(gal, j); }catch(e){ g.innerHTML = `<div class="msg err">Galerie konnte nicht geladen werden.</div>`; return; }
+  const all = j.items || [];
+  // Speicherort
+  $("#galInfo").innerHTML = gal.mode === "temp"
+    ? `<span>🗑 Keine Galerie – Ergebnisse werden nach ${gal.temp_hours} Std. gelöscht.</span> <button class="btn" type="button" onclick="gallerySetup(true)">Ändern</button>`
+    : `<span>📂 Gespeichert in:</span> <code>${esc(gal.dir)}</code> <span class="hint">· ${all.length} Dateien · ${GBf(gal.total || 0)}</span> ${host && host.openFolder ? `<button class="btn" type="button" id="galOpen">Ordner öffnen</button>` : ""}<button class="btn" type="button" onclick="gallerySetup(true)">Ändern</button>`;
+  if($("#galOpen")) $("#galOpen").onclick = () => host.openFolder(gal.dir);
+  chips($("#galFilter"), [["all", { n: "Alle" }], ["video", { n: "Videos" }], ["image", { n: "Bilder" }]], galKind, k => { galKind = k; loadGallery(); });
+  const byKind = all.filter(f => galKind === "all" || f.kind === galKind || (galKind === "video") === isVideo(f) && !f.kind);
+  const models = {};
+  for(const f of byKind) models[f.model] = (models[f.model] || 0) + 1;
+  const latest = {};
+  for(const f of byKind) latest[f.model] = Math.max(latest[f.model] || 0, f.created || 0);
+  const names = Object.keys(models).sort((a, b) => (a === "Ohne Zuordnung") - (b === "Ohne Zuordnung") || latest[b] - latest[a]);
+  if(galModel !== "all" && !models[galModel]) galModel = "all";
+  chips($("#galModels"), [["all", { n: "Alle Modelle", sub: String(byKind.length) }]].concat(names.map(n => [n, { n, sub: String(models[n]) }])), galModel, m => { galModel = m; store.set("galModel", m); loadGallery(); });
+  g.innerHTML = "";
+  if(!byKind.length){ g.innerHTML = `<div class="hint">Noch nichts erstellt.</div>`; return; }
+  const groups = galModel === "all" ? names : [galModel];
+  const wrap = $("#galWrap"); wrap.innerHTML = "";
+  for(const m of groups){
+    const items = byKind.filter(f => f.model === m);
+    if(!items.length) continue;
+    if(galModel === "all"){ const h = document.createElement("div"); h.className = "gsec"; h.innerHTML = `<h3>${esc(m)}</h3><span class="hint">${items.length}</span>`; wrap.appendChild(h); }
+    const grid = document.createElement("div"); grid.className = "gal";
+    for(const f of items.slice(0, 200)){
       const it = document.createElement("div"); it.className = "it";
       it.appendChild(mediaEl(f, true));
+      if(f.prompt) it.title = f.prompt;
       const meta = document.createElement("div"); meta.className = "meta";
-      meta.innerHTML = `<span>${f.cloud ? "☁️ " : ""}${esc(f.filename)}</span><a href="${viewUrl(f)}" download="${esc(f.filename)}">Laden</a>`;
-      it.appendChild(meta); g.appendChild(it);
+      meta.innerHTML = `<span class="nm">${f.cloud ? "☁️ " : ""}${esc(fmtDate(f.created))}</span><span class="ac">${host && host.showItem ? `<button type="button" title="Im Ordner zeigen">📂</button>` : ""}<a href="${dlUrl(f)}" download="${esc(f.name)}" title="Herunterladen">⬇</a><button type="button" title="Löschen">🗑</button></span>`;
+      const bs = meta.querySelectorAll("button");
+      if(host && host.showItem) bs[0].onclick = () => showInFolder(f);
+      bs[bs.length - 1].onclick = async () => {
+        if(!confirm(T("Diese Datei endgültig löschen?") + "\n" + f.name)) return;
+        const r = await api("/easy/gallery/delete", { r: f.r, p: f.p });
+        if(r.error) toast("❌ " + esc(r.error), "err"); else it.remove();
+      };
+      it.appendChild(meta); grid.appendChild(it);
     }
-  }catch(e){ g.innerHTML = `<div class="msg err">Galerie konnte nicht geladen werden.</div>`; }
+    wrap.appendChild(grid);
+  }
 }
+// Abfrage beim ersten Start (und über „Ändern“): Wo sollen die Ergebnisse gespeichert werden?
+async function gallerySetup(force){
+  await loadGalSettings();
+  if(gal.mode && !force) return;
+  let def = gal.own_dir ? gal.dir : "";
+  if(!def && host && host.defaultGalleryDir){ try{ def = await host.defaultGalleryDir(); }catch(e){} }
+  let pick = gal.mode === "temp" ? "temp" : gal.own_dir || !gal.mode ? (def ? "own" : "comfy") : "comfy", dir = def;
+  const cnt = await api("/easy/gallery/count_output");
+  const m = $("#modal"), c = $("#modalCard");
+  const draw = () => {
+    c.innerHTML = `<h3>📁 Wo sollen deine Videos und Bilder gespeichert werden?</h3>
+      <p class="hint" style="margin:0 0 4px">Das kannst du jederzeit in der Galerie oder in den Einstellungen ändern.</p>
+      <div class="gopt ${pick === "own" ? "act" : ""}" data-v="own"><input type="radio" ${pick === "own" ? "checked" : ""}><div><b>In einem eigenen Ordner (empfohlen)</b>
+        <div class="hint">Nach Modellen sortiert in Unterordnern. Die Dateien liegen dort schon – herunterladen ist nicht nötig, also kein doppelter Speicherplatz.</div>
+        <div class="row" style="margin-top:6px"><input type="text" id="gsDir" value="${esc(dir)}" placeholder="z. B. D:\\Videos\\Easy Generate">${host ? `<button class="btn" type="button" id="gsPick">Wählen …</button>` : ""}</div></div></div>
+      <div class="gopt ${pick === "comfy" ? "act" : ""}" data-v="comfy"><input type="radio" ${pick === "comfy" ? "checked" : ""}><div><b>Im ComfyUI-Ausgabeordner (wie bisher)</b><div class="hint">${esc(gal.output_dir || "")}</div></div></div>
+      <div class="gopt ${pick === "temp" ? "act" : ""}" data-v="temp"><input type="radio" ${pick === "temp" ? "checked" : ""}><div><b>Keine Galerie</b><div class="hint">Du lädst jedes Ergebnis selbst herunter. Was nicht heruntergeladen wird, löscht Easy Generate nach ${gal.temp_hours || 24} Std.</div></div></div>
+      ${cnt.count && pick === "own" ? `<label class="row hint" style="gap:8px;margin-top:10px"><input type="checkbox" id="gsMove" checked> Bisherige Ergebnisse (${cnt.count} Dateien, ${GBf(cnt.size)}) in den neuen Ordner verschieben</label>` : ""}
+      <div id="gsMsg" style="margin-top:8px"></div>
+      <div class="actions" style="margin-top:12px"><button class="btn pri" type="button" id="gsOk">Speichern</button>${gal.mode ? `<button class="btn" type="button" id="gsNo">Abbrechen</button>` : ""}</div>`;
+    c.querySelectorAll(".gopt").forEach(o => o.onclick = e => { if(e.target.closest("input[type=text],button")) return; dir = $("#gsDir").value; pick = o.dataset.v; draw(); });
+    $("#gsDir").oninput = e => { dir = e.target.value; };
+    if($("#gsPick")) $("#gsPick").onclick = async () => { const d = host.chooseGalleryDir ? await host.chooseGalleryDir(dir || def) : await host.setup.chooseFolder(dir || def); if(d){ dir = d; pick = "own"; draw(); } };
+    if($("#gsNo")) $("#gsNo").onclick = () => m.classList.add("hidden");
+    $("#gsOk").onclick = async () => {
+      dir = ($("#gsDir").value || "").trim();
+      if(pick === "own" && !dir){ $("#gsMsg").innerHTML = `<div class="msg err">Bitte einen Ordner angeben.</div>`; return; }
+      const move = $("#gsMove") && $("#gsMove").checked;
+      $("#gsOk").disabled = true;
+      const r = await api("/easy/gallery/settings", { mode: pick === "temp" ? "temp" : "keep", dir: pick === "own" ? dir : "" });
+      if(r.error){ $("#gsOk").disabled = false; $("#gsMsg").innerHTML = `<div class="msg err">${esc(r.error)}</div>`; return; }
+      if(pick === "own" && move){ $("#gsMsg").innerHTML = `<span class="hint">Verschiebe Dateien …</span>`; const mv = await api("/easy/gallery/migrate", {}); if(mv.moved) toast(`✅ ${mv.moved} Dateien verschoben.`, "ok"); }
+      m.classList.add("hidden");
+      await loadGalSettings();
+      if(state.tab === "gal") loadGallery();
+      if(state.tab === "set") renderSettings();
+    };
+  };
+  draw();
+  m.classList.remove("hidden");
+}
+window.gallerySetup = gallerySetup;
 $("#galReload").onclick = loadGallery;
 
 /* ================= Modelle ================= */
@@ -1837,6 +1931,12 @@ async function pollSys(){
     if(s.ram_total){ const p = s.ram_used / s.ram_total * 100; hist.ram.push(p); $("#mRam").textContent = pct(p); $("#mRamS").textContent = `${gb(s.ram_used)} / ${gb(s.ram_total)} GB`; spark("#sRam", hist.ram); }
     if(s.gpu != null){ hist.gpu.push(s.gpu); $("#mGpu").textContent = pct(s.gpu); spark("#sGpu", hist.gpu); }
     $("#mGpuN").textContent = s.gpu_name ? String(s.gpu_name).replace(/^\w+:\d+\s*/, "").replace(/\s*:\s*\w+$/, "").slice(0, 32) : " ";
+    const temp = (el, t, extra, missing) => {
+      if(t == null){ el.textContent = missing || ""; el.title = missing ? "Windows gibt die CPU-Temperatur ohne Zusatzprogramm meist nicht heraus. Läuft LibreHardwareMonitor, zeigt Easy Generate sie hier an." : ""; return; }
+      el.innerHTML = `🌡 <b class="${t >= 85 ? "hot" : t >= 75 ? "warm" : ""}">${Math.round(t)} °C</b>${extra || ""}`; el.title = "";
+    };
+    temp($("#mCpuT"), s.cpu_temp, s.cpu_temp_src === "acpi" ? ` <span class="hint">(Mainboard-Fühler)</span>` : "", s.cpu_temp_known === false ? "" : (s.gpu_temp != null ? "🌡 –" : ""));
+    temp($("#mGpuT"), s.gpu_temp, s.gpu_fan ? ` · Lüfter ${s.gpu_fan} U/min` : "");
     if(s.vram_total){ $("#mVram").textContent = `${gb(s.vram_used)} / ${gb(s.vram_total)} GB`; $("#mVramB").style.width = (s.vram_used / s.vram_total * 100).toFixed(0) + "%"; }
     for(const k in hist) if(hist[k].length > 120) hist[k].splice(0, 60);
   }catch(e){}
@@ -2017,6 +2117,7 @@ async function renderSettings(){
   $("#keyHint").textContent = state.cfg.claude_key_set ? "(gespeichert " + state.cfg.claude_key_hint + " – leer lassen zum Behalten)" : "";
   $("#clModel").value = state.cfg.claude_model || "claude-haiku-5-5";
   $("#hfHint").textContent = state.cfg.hf_token_set ? " gespeichert ✓" : "";
+  loadGalSettings().then(g => { $("#galSetInfo").innerHTML = g.mode === "temp" ? "Keine Galerie – Ergebnisse werden nach 24 Std. gelöscht." : `Gespeichert in: <code>${esc(g.dir)}</code>${g.own_dir ? " (nach Modellen sortiert)" : ""}`; });
   refreshOllama();
   // Programm & ComfyUI (nur im Easy-Generate-Programm)
   if(host){
@@ -2096,6 +2197,7 @@ function showUpdate(v){
   showTab(t);
   watchDownload();
   loadCatalog(true);
+  gallerySetup(false);
 })();
 </script>
 </body>
