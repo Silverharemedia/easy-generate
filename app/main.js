@@ -338,12 +338,14 @@ function createWindow() {
     let close = cfg.closeMode === "always";
     const running = cfg.comfy && await comfyAt(cfg.comfy.port);
     if (running && cfg.closeMode === "ask") {
-      const en = cfg.lang === "en";
+      const T = {
+        de: { b: ["Ja, schließen", "Nein, weiterlaufen lassen"], m: "Soll ComfyUI auch geschlossen werden?", d: "Das gibt den Grafikspeicher wieder frei. Lässt du es laufen, startet Easy Generate beim nächsten Mal schneller.", c: "Nicht mehr fragen – ComfyUI immer automatisch schließen" },
+        en: { b: ["Yes, close it", "No, keep it running"], m: "Close ComfyUI as well?", d: "This frees your graphics memory. If you keep it running, Easy Generate starts faster next time.", c: "Don't ask again – always close ComfyUI automatically" },
+        ru: { b: ["Да, закрыть", "Нет, оставить запущенным"], m: "Закрыть и ComfyUI?", d: "Это освободит видеопамять. Если оставить его запущенным, Easy Generate в следующий раз запустится быстрее.", c: "Больше не спрашивать – всегда закрывать ComfyUI автоматически" },
+      }[cfg.lang] || null;
+      const t = T || { b: ["Ja, schließen", "Nein, weiterlaufen lassen"], m: "Soll ComfyUI auch geschlossen werden?", d: "Das gibt den Grafikspeicher wieder frei.", c: "Nicht mehr fragen – ComfyUI immer automatisch schließen" };
       const r = await dialog.showMessageBox(win, {
-        type: "question", title: "Easy Generate", buttons: en ? ["Yes, close it", "No, keep it running"] : ["Ja, schließen", "Nein, weiterlaufen lassen"], defaultId: 0, cancelId: 1,
-        message: en ? "Close ComfyUI as well?" : "Soll ComfyUI auch geschlossen werden?",
-        detail: en ? "This frees your graphics memory. If you keep it running, Easy Generate starts faster next time." : "Das gibt den Grafikspeicher wieder frei. Lässt du es laufen, startet Easy Generate beim nächsten Mal schneller.",
-        checkboxLabel: en ? "Don't ask again – always close ComfyUI automatically" : "Nicht mehr fragen – ComfyUI immer automatisch schließen", checkboxChecked: false,
+        type: "question", title: "Easy Generate", buttons: t.b, defaultId: 0, cancelId: 1, message: t.m, detail: t.d, checkboxLabel: t.c, checkboxChecked: false,
       });
       close = r.response === 0;
       if (close && r.checkboxChecked) { cfg.closeMode = "always"; saveCfg(); }
@@ -442,7 +444,7 @@ async function installOllama() {
 ipcMain.handle("app:ollamaInfo", async () => ({ installed: !!ollamaExe(), running: !!(await ollamaUp()) }));
 ipcMain.handle("app:installOllama", () => installOllama());
 ipcMain.handle("app:startOllama", () => startOllama());
-ipcMain.handle("app:setLang", (e, l) => { if (["de", "en"].includes(l)) { cfg.lang = l; saveCfg(); } return true; });
+ipcMain.handle("app:setLang", (e, l) => { if (["de", "en", "ru"].includes(l)) { cfg.lang = l; saveCfg(); } return true; });
 ipcMain.handle("app:getLang", () => cfg.lang || "de");
 
 // ------------------------------------------------------------------ Start

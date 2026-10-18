@@ -15,7 +15,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -640,7 +640,7 @@ async def easy_assist(request):
         return web.json_response({"error": "Bitte zuerst eine Idee eintippen."}, status=400)
     cfg = load_cfg()
     rules = RULES[kind] + ("\n" + RULES["with_image"] if image_b64 else "")
-    explain_lang = "English" if data.get("lang") == "en" else "German"
+    explain_lang = {"en": "English", "ru": "Russian"}.get(data.get("lang"), "German")
     system = SYSTEM_PROMPT.format(target=f"{model_title} ({kind})", rules=rules, explain_lang=explain_lang)
     user = (f"Video length: {seconds} seconds.\n" if kind == "video" else "") + f"User idea (may be German): {idea or '(none)'}"
     if wish:
@@ -729,6 +729,65 @@ def ensure_gpu_reader():
     if not GPU_STAT["started"]:
         GPU_STAT["started"] = True
         threading.Thread(target=_gpu_reader, daemon=True).start()
+
+
+PS_SPECS = r"""
+$ErrorActionPreference='SilentlyContinue'
+$c = Get-CimInstance Win32_Processor | Select-Object -First 1
+$m = @(Get-CimInstance Win32_PhysicalMemory)
+$o = [ordered]@{
+  cpu_name = ($c.Name).Trim(); cores = $c.NumberOfCores; threads = $c.NumberOfLogicalProcessors; mhz = $c.MaxClockSpeed
+  ram_type = ($m | Select-Object -First 1).SMBIOSMemoryType; ram_speed = ($m | Measure-Object -Property ConfiguredClockSpeed -Maximum).Maximum
+  ram_rated = ($m | Measure-Object -Property Speed -Maximum).Maximum; ram_modules = @($m | ForEach-Object { [int64]$_.Capacity })
+}
+$o | ConvertTo-Json -Compress
+"""
+RAM_TYPES = {20: "DDR", 21: "DDR2", 24: "DDR3", 26: "DDR4", 30: "LPDDR4", 34: "DDR5", 35: "LPDDR5"}
+_SPECS = None
+
+
+def hw_specs():
+    global _SPECS
+    if _SPECS is not None:
+        return _SPECS
+    s = {}
+    try:
+        if os.name == "nt":
+            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", PS_SPECS],
+                               capture_output=True, text=True, timeout=20, creationflags=0x08000000)
+            j = json.loads(r.stdout.strip() or "{}")
+            mods = [m for m in (j.get("ram_modules") or []) if m]
+            s = {"cpu_name": j.get("cpu_name") or "", "cores": j.get("cores"), "threads": j.get("threads"),
+                 "mhz": j.get("mhz"), "ram_type": RAM_TYPES.get(j.get("ram_type") or 0, ""),
+                 "ram_speed": j.get("ram_speed") or j.get("ram_rated"), "ram_modules": mods}
+        else:
+            import platform
+            name = ""
+            try:
+                with open("/proc/cpuinfo") as f:
+                    for line in f:
+                        if line.startswith("model name"):
+                            name = line.split(":", 1)[1].strip()
+                            break
+            except Exception:
+                pass
+            s = {"cpu_name": name or platform.processor(), "cores": None, "threads": os.cpu_count(), "mhz": None,
+                 "ram_type": "", "ram_speed": None, "ram_modules": []}
+        try:
+            import psutil
+            s["cores"] = s.get("cores") or psutil.cpu_count(logical=False)
+            s["threads"] = s.get("threads") or psutil.cpu_count(logical=True)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    _SPECS = s
+    return s
+
+
+@routes.get("/easy/specs")
+async def easy_specs(request):
+    return web.json_response(await asyncio.to_thread(hw_specs))
 
 
 @routes.get("/easy/sysinfo")

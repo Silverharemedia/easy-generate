@@ -65,7 +65,7 @@ label.l{display:block;color:var(--muted);font-size:13px;margin:14px 0 6px}
 
   <!-- Assistent: Schritt 1 -->
   <div id="vWiz" class="hidden">
-    <div class="row" style="justify-content:space-between"><h2>Willkommen!</h2><div class="chips"><button class="chip" id="lDe">Deutsch</button><button class="chip" id="lEn">English</button></div></div>
+    <div class="row" style="justify-content:space-between"><h2>Willkommen!</h2><div class="chips"><button class="chip" id="lDe">Deutsch</button><button class="chip" id="lEn">English</button><button class="chip" id="lRu">Русский</button></div></div>
     <p class="sub">Easy Generate braucht <b>ComfyUI</b> – das ist die KI-Maschine, die im Hintergrund die Bilder und Videos berechnet.</p>
     <div id="wScan" class="card"><div class="hint">Suche nach vorhandenen ComfyUI-Installationen …</div><div class="bar ind"><div></div></div></div>
     <div id="wOpts"></div>
@@ -185,7 +185,7 @@ $("#nGo").onclick = async () => {
 };
 
 $("#lDe").classList.toggle("act", EG_I18N.lang === "de"); $("#lEn").classList.toggle("act", EG_I18N.lang === "en");
-$("#lDe").onclick = () => EG_I18N.setLang("de"); $("#lEn").onclick = () => EG_I18N.setLang("en");
+$("#lDe").onclick = () => EG_I18N.setLang("de"); $("#lEn").onclick = () => EG_I18N.setLang("en"); $("#lRu").onclick = () => EG_I18N.setLang("ru"); $("#lRu").classList.toggle("act", EG_I18N.lang === "ru");
 (async () => { const st = await S.state(); if(!st.hasComfy) wizard(); })();
 </script>
 </body>

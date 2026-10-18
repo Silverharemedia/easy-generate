@@ -1,6 +1,6 @@
 {
  "name": "easy-generate",
- "version": "1.1.0",
+ "version": "1.2.0",
  "description": "Einfache Bild- und Videogenerierung mit ComfyUI",
  "main": "main.js",
  "scripts": {
