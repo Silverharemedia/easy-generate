@@ -941,7 +941,7 @@ function cloudErr(e){
     FORBIDDEN: "Zugriff verweigert – der Schlüssel hat dafür nicht genug Rechte oder das Modell ist gesperrt.",
     RATE: "Zu viele Anfragen – kurz warten und nochmal versuchen.",
     QUEUE_FULL: "Der Space ist gerade überlastet. Versuch einen anderen oder später nochmal.",
-    SPACE_DOWN: "Dieser Space ist gerade pausiert, schläft oder ist defekt. Wähle einen anderen (oder starte deinen gemieteten Space).",
+    SPACE_DOWN: "Dieser Space ist gerade pausiert, ausgeschaltet oder defekt. Wähle einen anderen (oder starte deinen gemieteten Space).",
     NO_OUTPUT: "Der Space hat kein Bild und kein Video zurückgegeben.",
     OFFLINE: "Keine Verbindung zu HuggingFace. Bist du online?",
     SAME_TOKEN: "Bitte für die Spaces einen eigenen Schlüssel ohne Rechte anlegen – nicht den Haupt-Schlüssel."
@@ -1203,13 +1203,13 @@ async function renderRent(){
   const a = cloud.acct || {};
   pane.innerHTML = `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr))">
     <div class="card"><h3>Neue GPU mieten</h3>
-      <p class="hint" style="margin:0 0 8px"><span>Easy Generate kopiert einen Space in dein HuggingFace-Konto (privat) und gibt ihm eine eigene Grafikkarte – keine Warteschlange, keine Tageslimits.</span> <span>Bezahlt wird pro Minute, solange er läuft. Ohne Nutzung schläft er nach der eingestellten Zeit von selbst ein und kostet dann nichts.</span></p>
+      <p class="hint" style="margin:0 0 8px"><span>Easy Generate kopiert einen Space in dein HuggingFace-Konto (privat) und gibt ihm eine eigene Grafikkarte – keine Warteschlange, keine Tageslimits.</span> <span>Bezahlt wird pro Minute, solange er läuft. Ohne Nutzung schaltet er sich nach der eingestellten Zeit selbst aus und kostet dann nichts.</span></p>
       <label class="l">Space (Programm), das auf der GPU laufen soll</label>
       <input type="text" id="rSpace" list="rSpaceList" placeholder="z. B. Lightricks/LTX-2-3" value="${esc(cloud.rentSpace)}">
       <datalist id="rSpaceList">${["Lightricks/LTX-2-3", "Lightricks/ltx-video-distilled", "zerogpu-aoti/wan2-2-fp8da-aoti-faster", "multimodalart/wan2-1-fast", "MiniMaxAI/MiniMax-H3-Turbo-Lora", "Qwen/Qwen-Image-2.1", "black-forest-labs/flux-3-image-klein", "Tongyi-MAI/Z-Image-Turbo"].map(x => `<option value="${x}">`).join("")}</datalist>
       <label class="l">Grafikkarte</label>
       <select class="sel" id="rHw"></select>
-      <label class="l">Automatisch einschlafen nach</label>
+      <label class="l">Schaltet sich automatisch aus nach</label>
       <select class="sel" id="rSleep"><option value="900">15 Min. ohne Nutzung (empfohlen)</option><option value="1800">30 Min.</option><option value="3600">1 Std.</option><option value="7200">2 Std.</option></select>
       <div class="hint" id="rCost" style="margin-top:10px"></div>
       <button class="big" id="rGo" type="button">GPU mieten</button>
@@ -1226,7 +1226,7 @@ async function renderRent(){
   if(def) hwSel.value = def.name;
   const cost = () => {
     const h = hws.find(x => x.name === hwSel.value), av = available();
-    $("#rCost").innerHTML = h ? `<div>Kosten: <b>${usd(h.per_hour)}/Std.</b></div>${av ? `<div>Dein Guthaben reicht für ≈ <b>${(av.v / h.per_hour).toFixed(1).replace(".", ",")} Std.</b></div>` : ""}<div>Der erste Start dauert einige Minuten (Space wird gebaut, Modell geladen) – auch diese Zeit kostet.</div>` : "";
+    $("#rCost").innerHTML = h ? `<div>Kosten: <b>${usd(h.per_hour)}/Std.</b></div>${av ? (av.v > 0.01 ? `<div>Dein Guthaben reicht für ≈ <b>${(av.v / h.per_hour).toFixed(1).replace(".", ",")} Std.</b></div>` : `<div class="msg warn" style="margin:6px 0">Kein Guthaben vorhanden – zum Mieten zuerst bei HuggingFace Guthaben aufladen.</div>`) : ""}<div>Der erste Start dauert einige Minuten (Space wird gebaut, Modell geladen) – auch diese Zeit kostet.</div>` : "";
   };
   hwSel.onchange = cost; cost();
   $("#rGo").onclick = async () => {
@@ -1234,7 +1234,7 @@ async function renderRent(){
     if(!/^[\w.\-]+\/[\w.\-]+$/.test(sp)){ $("#rMsg").innerHTML = `<div class="msg err">Bitte einen Space angeben, z. B. Lightricks/LTX-2-3.</div>`; return; }
     if(!a.token_set){ $("#rMsg").innerHTML = `<div class="msg err">${esc(cloudErr("AUTH"))}</div>`; return; }
     const h = hws.find(x => x.name === hwSel.value);
-    if(!confirm(T(`„${sp}“ auf ${h ? h.pretty : hwSel.value} mieten?`) + "\n\n" + T(`Kosten: ${h ? usd(h.per_hour) : "?"} pro Stunde, solange der Space läuft. Ohne Nutzung schläft er automatisch ein.`))) return;
+    if(!confirm(T(`„${sp}“ auf ${h ? h.pretty : hwSel.value} mieten?`) + "\n\n" + T(`Kosten: ${h ? usd(h.per_hour) : "?"} pro Stunde, solange der Space läuft. Ohne Nutzung schaltet er sich automatisch aus.`))) return;
     $("#rGo").disabled = true; $("#rMsg").innerHTML = `<span class="hint">Richte ein …</span>`;
     const r = await api("/easy/cloud/rent", { space: sp, hardware: hwSel.value, sleep: +$("#rSleep").value });
     $("#rGo").disabled = false;
@@ -1248,7 +1248,7 @@ async function renderRent(){
 }
 const STAGE = {
   RUNNING: ["läuft", "pay"], RUNNING_BUILDING: ["läuft (baut neu)", "pay"], BUILDING: ["wird gebaut", "pay"], APP_STARTING: ["startet", "pay"], RUNNING_APP_STARTING: ["startet", "pay"],
-  SLEEPING: ["schläft – kostenlos", "free"], PAUSED: ["pausiert – kostenlos", "free"], STOPPED: ["gestoppt – kostenlos", "free"],
+  SLEEPING: ["aus – kostenlos", "free"], PAUSED: ["pausiert – kostenlos", "free"], STOPPED: ["gestoppt – kostenlos", "free"],
   BUILD_ERROR: ["Fehler beim Bauen", "warn"], RUNTIME_ERROR: ["Fehler beim Starten", "warn"], CONFIG_ERROR: ["Fehler", "warn"], GONE: ["gelöscht", "warn"], ERROR: ["nicht erreichbar", "warn"], UNKNOWN: ["unbekannt", ""]
 };
 let rentTimer = null;
@@ -1266,7 +1266,7 @@ async function drawRented(){
     const [txt, cls] = STAGE[x.stage] || [x.stage || "?", ""];
     const d = document.createElement("div"); d.className = "ci";
     d.innerHTML = `<div class="tt">🖥️ ${esc(x.id.split("/").pop())}</div><div class="id">${esc(x.id)} · Vorlage: ${esc(x.from || "")}</div>
-      <div class="bd2"><span class="bdg ${cls}">${esc(txt)}</span><span class="bdg rent">${esc(x.pretty || "")}${x.per_hour != null ? " · " + usd(x.per_hour) + "/Std." : ""}</span>${x.sleep ? `<span class="bdg">schläft nach ${Math.round(x.sleep / 60)} Min.</span>` : ""}</div>
+      <div class="bd2"><span class="bdg ${cls}">${esc(txt)}</span><span class="bdg rent">${esc(x.pretty || "")}${x.per_hour != null ? " · " + usd(x.per_hour) + "/Std." : ""}</span>${x.sleep ? `<span class="bdg">geht nach ${Math.round(x.sleep / 60)} Min. ohne Nutzung aus</span>` : ""}</div>
       ${x.billing ? `<div class="hint">💸 Kostet gerade ${usd(x.per_hour)} pro Stunde.</div>` : ""}
       <div class="ac"><button class="btn pri" type="button" data-a="use">Benutzen</button>
         ${x.billing ? `<button class="btn" type="button" data-a="pause">⏸ Pausieren</button>` : x.stage !== "GONE" ? `<button class="btn" type="button" data-a="start">▶ Starten</button>` : ""}
@@ -1408,7 +1408,7 @@ async function renderSpaceForm(s){
   const k = state.kind;
   $("#cFmtBox").classList.add("hidden");
   $("#cGo").textContent = k === "video" ? "☁️ Video in der Cloud erstellen" : "☁️ Bild in der Cloud erstellen";
-  $("#cHint").textContent = s.rented ? "Läuft auf deiner gemieteten GPU – kostet pro Minute, solange der Space wach ist." : "Gratis über das ZeroGPU-Tageskontingent. Bei Andrang gibt es eine Warteschlange.";
+  $("#cHint").textContent = s.rented ? "Läuft auf deiner gemieteten GPU – kostet pro Minute, solange der Space eingeschaltet ist." : "Gratis über das ZeroGPU-Tageskontingent. Bei Andrang gibt es eine Warteschlange.";
   if(!(await checkSetup())){
     $("#cSlots").innerHTML = `<div class="msg warn">Für die Cloud braucht Easy Generate einmalig zwei kleine Bausteine. <button class="btn pri" type="button" onclick="showTab('cloud')">Zu ☁️ Cloud</button></div>`;
     ["#cPromptLbl", "#cPrompt", "#cAi", "#cDurBox", "#cEpBox"].forEach(x => $(x).classList.add("hidden"));
