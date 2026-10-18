@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld("easyApp", {
   onOllamaProgress: cb => on("ollama:progress", cb),
   setLang: l => ipcRenderer.invoke("app:setLang", l),
   getLang: () => ipcRenderer.invoke("app:getLang"),
+  hfWallet: () => ipcRenderer.invoke("app:hfWallet"),
+  hfLogin: () => ipcRenderer.invoke("app:hfLogin"),
+  hfLogout: () => ipcRenderer.invoke("app:hfLogout"),
   setup: {
     state: () => ipcRenderer.invoke("setup:state"),
     detect: () => ipcRenderer.invoke("setup:detect"),

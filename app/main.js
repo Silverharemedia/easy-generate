@@ -2,7 +2,7 @@
 // Kümmert sich um: ComfyUI finden/installieren/starten, die Easy-Generate-Erweiterung einspielen,
 // das Programmfenster, die Schließen-Abfrage und Updates.
 "use strict";
-const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -350,12 +350,80 @@ function createWindow() {
       close = r.response === 0;
       if (close && r.checkboxChecked) { cfg.closeMode = "always"; saveCfg(); }
     }
+    if (running) await pauseRented();
     if (running && close) await killComfy();
     quitting = true; win.close(); app.quit();
   });
 }
 
+// ------------------------------------------------------------------ HuggingFace-Guthaben
+// Das Guthaben (Prepaid-Credits) zeigt HuggingFace nur auf der angemeldeten Abrechnungsseite.
+// Dafür gibt es ein eigenes Anmeldefenster mit getrennter Sitzung; die Cookies bleiben auf dem PC
+// und gehen nur an huggingface.co.
+const HF_PART = "persist:huggingface";
+const isHF = u => { try { const h = new URL(u).hostname; return h === "huggingface.co" || h.endsWith(".huggingface.co"); } catch (e) { return false; } };
+function decodeEntities(s) {
+  return s.replace(/&(#x[0-9a-f]+|#\d+|quot|amp|apos|lt|gt|nbsp);/gi, (m, b) => {
+    const k = b.toLowerCase();
+    if (k[0] === "#") return String.fromCodePoint(k[1] === "x" ? parseInt(k.slice(2), 16) : parseInt(k.slice(1), 10));
+    return { quot: '"', amp: "&", apos: "'", lt: "<", gt: ">", nbsp: "\u00a0" }[k];
+  });
+}
+function parseWallet(html) {
+  const out = {};
+  const re = /data-props\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+  let m;
+  const visit = (o, depth) => {
+    if (!o || typeof o !== "object" || depth > 8) return;
+    if (o.entity && typeof o.entity === "object" && typeof o.entity.currentBalanceUsd === "number" && (o.entity.type || "user") === "user") out.balance = o.entity.currentBalanceUsd;
+    if (out.balance == null && typeof o.invoiceCreditsCents === "number") out.balance = o.invoiceCreditsCents / 100;
+    for (const k of ["includedNanoUsd", "usedNanoUsd", "limitNanoUsd"]) if (typeof o[k] === "number" && out[k] == null) out[k] = o[k];
+    for (const v of Object.values(o)) if (v && typeof v === "object") visit(v, depth + 1);
+  };
+  while ((m = re.exec(html))) { try { visit(JSON.parse(decodeEntities(m[1] != null ? m[1] : m[2])), 0); } catch (e) {} }
+  return out;
+}
+async function hfWallet() {
+  try {
+    const ses = session.fromPartition(HF_PART);
+    const r = await ses.fetch("https://huggingface.co/settings/billing", { headers: { Accept: "text/html" } });
+    if (!r.ok || !isHF(r.url) || /\/login/.test(new URL(r.url).pathname)) return { login: true };
+    const w = parseWallet(await r.text());
+    if (w.balance == null) return { login: !w.includedNanoUsd, unknown: true, ...w };
+    return { ...w, at: Date.now() };
+  } catch (e) { return { error: String(e.message || e) }; }
+}
+function hfLogin() {
+  return new Promise(resolve => {
+    const w = new BrowserWindow({
+      width: 520, height: 780, parent: win, title: "HuggingFace – Anmelden", icon: APP_ICON, autoHideMenuBar: true, backgroundColor: "#ffffff",
+      webPreferences: { partition: HF_PART, contextIsolation: true, nodeIntegration: false, sandbox: true },
+    });
+    w.setMenu(null);
+    let done = false;
+    const finish = ok => { if (done) return; done = true; resolve(ok); if (!w.isDestroyed()) w.close(); };
+    w.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: "deny" }; });
+    w.webContents.on("did-navigate", (e, url) => { if (isHF(url) && new URL(url).pathname.startsWith("/settings/billing")) setTimeout(() => finish(true), 600); });
+    w.on("closed", () => { if (!done) { done = true; resolve(false); } });
+    w.loadURL("https://huggingface.co/login?next=%2Fsettings%2Fbilling");
+  });
+}
+async function hfLogout() { try { await session.fromPartition(HF_PART).clearStorageData(); } catch (e) {} return true; }
+async function pauseRented() {
+  // Gemietete GPUs (eigene Spaces) beim Beenden pausieren, damit keine Kosten weiterlaufen.
+  if (!cfg.comfy || !cfg.comfy.port) return;
+  await new Promise(resolve => {
+    const req = http.request({ host: "127.0.0.1", port: cfg.comfy.port, path: "/easy/cloud/pause_all", method: "POST", headers: { "Content-Type": "application/json" }, timeout: 15000 }, res => { res.resume(); res.on("end", resolve); });
+    req.on("error", resolve); req.on("timeout", () => { req.destroy(); resolve(); });
+    req.end("{}");
+  });
+}
+
 // ------------------------------------------------------------------ IPC
+ipcMain.handle("app:hfWallet", () => hfWallet());
+ipcMain.handle("app:hfLogin", () => hfLogin());
+ipcMain.handle("app:hfLogout", () => hfLogout());
+ipcMain.handle("app:openExternal", (e, url) => { if (isHF(url)) shell.openExternal(url); return true; });
 ipcMain.handle("app:info", () => ({
   version: app.getVersion(), nodeVersion: NODE_VERSION, comfyRoot: cfg.comfy && (cfg.comfy.portable || cfg.comfy.comfyDir),
   managed: !!(cfg.comfy && cfg.comfy.managed), canUpdateComfy: !!(cfg.comfy && cfg.comfy.portable), closeMode: cfg.closeMode, port: cfg.comfy && cfg.comfy.port,

@@ -15,7 +15,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -63,7 +63,7 @@ async def easy_version(request):
 
 # ---------------------------------------------------------------- Einstellungen
 DEFAULT_CFG = {"provider": "ollama", "claude_key": "", "claude_model": "claude-haiku-5-5",
-               "ollama_url": "http://127.0.0.1:11434", "ollama_model": "", "hf_token": "",
+               "ollama_url": "http://127.0.0.1:11434", "ollama_model": "", "hf_token": "", "hf_space_token": "",
                "active": {"video": "", "image": ""}}
 
 
@@ -80,6 +80,8 @@ def public_cfg(cfg):
     out["claude_key_hint"] = ("…" + k[-4:]) if k else ""
     t = out.pop("hf_token", "")
     out["hf_token_set"] = bool(t)
+    st = out.pop("hf_space_token", "")
+    out["hf_space_token_set"] = bool(st)
     return out
 
 
@@ -95,11 +97,15 @@ async def easy_set_cfg(request):
     for k in ("provider", "claude_model", "ollama_url", "ollama_model"):
         if isinstance(data.get(k), str):
             cfg[k] = data[k].strip()
-    for k in ("claude_key", "hf_token"):
+    for k in ("claude_key", "hf_token", "hf_space_token"):
         if isinstance(data.get(k), str) and data[k].strip():
             cfg[k] = data[k].strip()
         if data.get(k + "_clear"):
             cfg[k] = ""
+    if cfg.get("hf_space_token") and cfg["hf_space_token"] == cfg.get("hf_token"):
+        cfg["hf_space_token"] = ""
+        write_json(CFG_FILE, cfg)
+        return web.json_response(dict(public_cfg(cfg), error="SAME_TOKEN"))
     if isinstance(data.get("active"), dict):
         cfg["active"].update({k: v for k, v in data["active"].items() if k in ("video", "image") and isinstance(v, str)})
     write_json(CFG_FILE, cfg)
@@ -983,6 +989,11 @@ async def easy_ollama_pull(request):
 async def easy_ollama_pull_status(request):
     return web.json_response(OLLAMA_PULL)
 
+
+try:
+    from . import cloud  # noqa: F401  (registriert die Cloud-Routen)
+except Exception as _e:
+    print("[Easy Generate] Cloud-Modul nicht geladen:", _e)
 
 print(f"[Easy Generate] Erweiterung {VERSION} bereit unter /easy")
 

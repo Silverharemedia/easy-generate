@@ -109,6 +109,23 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
 .mc2 .mini{height:6px;background:var(--panel2);border-radius:9px;overflow:hidden;margin-top:6px}.mc2 .mini>div{height:100%;background:var(--accent2)}
 .tog{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;width:28px;height:28px;cursor:pointer}
 .eta{display:flex;gap:6px;align-items:center;margin-top:10px;color:var(--muted);font-size:13px}
+.compute{margin:-4px 0 14px}
+.bdg{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.bdg.free{color:var(--ok);border-color:#1f5a3e;background:#12261d}.bdg.pay{color:var(--accent2);border-color:var(--accent);background:#2a1b16}
+.bdg.rent{color:#9cc2ff;border-color:#294a7a;background:#132036}.bdg.warn{color:var(--warn);border-color:#5c4818;background:#2b2312}
+.money{font-size:28px;font-weight:800;letter-spacing:-.5px}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px dashed var(--line);font-size:14px}.kv:last-child{border:0}
+.kv span:first-child{color:var(--muted)}
+.steps{margin:6px 0 0;padding-left:20px;font-size:14px}.steps li{margin:6px 0}
+.clist{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.ci{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px}
+.ci.act{border-color:var(--accent)}
+.ci .tt{font-weight:600;font-size:14px;display:flex;gap:6px;align-items:center}
+.ci .id{font-size:12px;color:var(--muted);word-break:break-all}
+.ci .ds{font-size:12px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ci .bd2{display:flex;gap:4px;flex-wrap:wrap}
+.ci .ac{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:4px}.ci .ac .btn{font-size:13px;padding:6px 10px}
+.avatar{width:38px;height:38px;border-radius:50%;background:var(--panel2);flex:none;object-fit:cover}
 @media (max-width:1180px){.mon{display:none}}
 </style>
 </head>
@@ -119,6 +136,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
     <div class="nav">
       <button data-tab="video" class="act"><span class="ico">🎬</span>Video</button>
       <button data-tab="image"><span class="ico">🖼️</span>Bild</button>
+      <button data-tab="cloud"><span class="ico">☁️</span>Cloud<span class="badge hidden" id="clBadge"></span></button>
       <button data-tab="gal"><span class="ico">📁</span>Galerie</button>
       <button data-tab="models"><span class="ico">📦</span>Modelle<span class="badge hidden" id="dlBadge"></span></button>
       <button data-tab="set"><span class="ico">⚙️</span>Einstellungen</button>
@@ -137,16 +155,51 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
   <section id="studio">
     <h1 id="stTitle">Video erstellen</h1>
     <p class="sub" id="stSub"></p>
+    <div class="chips compute" id="computeSw"></div>
     <div id="noTool" class="card hidden"></div>
     <div id="studioBody">
-      <div class="toolsel">
+      <div class="toolsel" id="toolRow">
         <span class="hint">Modell:</span>
         <select class="sel" id="toolSel"></select>
         <button class="btn" type="button" id="moreModels">+ Weitere Modelle</button>
       </div>
       <div id="notReady" class="msg warn hidden" style="margin-bottom:14px"></div>
       <div class="grid">
-        <div class="card">
+        <div class="card hidden" id="cloudCard">
+          <div class="toolsel" style="margin-bottom:8px">
+            <select class="sel" id="cSel" style="width:auto;flex:1;min-width:0"></select>
+            <button class="btn" type="button" id="cMore" style="white-space:nowrap">+ Auswahl</button>
+          </div>
+          <div id="cInfo" class="hint" style="margin-bottom:6px"></div>
+          <div id="cEmpty" class="hidden"></div>
+          <div id="cForm">
+            <div id="cEpBox" class="hidden"><label class="l" style="margin-top:6px">Funktion</label><select class="sel" id="cEp"></select></div>
+            <div id="cSlots" class="slots" style="margin-top:10px"></div>
+            <label class="l" for="cPrompt" id="cPromptLbl">Beschreibe dein Video</label>
+            <textarea id="cPrompt"></textarea>
+            <div class="actions" style="margin-top:8px"><button class="btn" type="button" id="cAi">✨ Prompt mit KI verbessern</button></div>
+            <div id="cAiBox" class="card hidden" style="margin-top:10px;background:var(--panel2)">
+              <div class="hint" style="margin-bottom:6px">Vorschlag (Englisch – die Modelle verstehen Englisch am besten):</div>
+              <textarea id="cAiOut" style="min-height:110px"></textarea>
+              <div class="hint" id="cAiDe" style="margin:6px 0"></div>
+              <div class="actions"><button class="btn pri" type="button" id="cAiUse">Übernehmen</button><button class="btn" type="button" id="cAiClose">Verwerfen</button></div>
+            </div>
+            <div id="cFmtBox"><label class="l">Format</label><div class="chips" id="cAspect"></div></div>
+            <div id="cDurBox"><label class="l">Länge: <b id="cDurTxt">5 s</b></label><div class="row"><input type="range" id="cDur" min="1" max="10" step="0.5" value="5"></div></div>
+            <details id="cAdv">
+              <summary>Erweitert</summary>
+              <div id="cNegBox"><label class="l" for="cNeg">Was soll NICHT vorkommen?</label>
+              <textarea id="cNeg" style="min-height:64px" placeholder="leer = Standard"></textarea></div>
+              <div id="cSeedBox"><label class="l">Seed (gleicher Seed + gleicher Prompt = gleiches Ergebnis)</label>
+              <div class="row"><label class="row" style="gap:6px;white-space:nowrap"><input type="checkbox" id="cSeedRand" checked> zufällig</label><input type="number" id="cSeed" min="0" placeholder="Seed" disabled></div></div>
+              <div id="cExtra"></div>
+            </details>
+            <button class="big" id="cGo">In der Cloud erstellen</button>
+            <div class="eta" id="cEta"></div>
+            <p class="hint" id="cHint" style="margin:8px 0 0"></p>
+          </div>
+        </div>
+        <div class="card" id="localCard">
           <div id="imgSlots" class="slots"></div>
           <label class="l" for="prompt" id="promptLbl">Was soll passieren?</label>
           <textarea id="prompt"></textarea>
@@ -193,6 +246,18 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
         </div>
       </div>
     </div>
+  </section>
+
+  <!-- CLOUD -->
+  <section id="cloud" class="hidden">
+    <h1>☁️ Cloud</h1><p class="sub">Videos und Bilder auf den Grafikkarten von HuggingFace erstellen – ohne Modell-Download, auch wenn der eigene PC zu schwach ist.</p>
+    <div id="clSetup" class="msg warn hidden" style="margin-bottom:14px"></div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr))">
+      <div class="card" id="clAcct"><span class="hint">Lade …</span></div>
+      <div class="card" id="clReach"></div>
+    </div>
+    <div class="chips" id="clTabs" style="margin:18px 0 12px"></div>
+    <div id="clPane"></div>
   </section>
 
   <!-- GALERIE -->
@@ -471,7 +536,9 @@ function showTab(t){
   $("#gallery").classList.toggle("hidden", t !== "gal");
   $("#models").classList.toggle("hidden", t !== "models");
   $("#settings").classList.toggle("hidden", t !== "set");
+  $("#cloud").classList.toggle("hidden", t !== "cloud");
   if(t === "video" || t === "image"){ state.kind = t; renderStudio(); }
+  if(t === "cloud") renderCloud();
   if(t === "gal") loadGallery();
   if(t === "models") loadCatalog();
   if(t === "set") renderSettings();
@@ -512,13 +579,20 @@ function renderStudio(){
   const k = state.kind, K = KIND[k], list = toolsOf(k);
   $("#stTitle").textContent = K.title;
   $("#stSub").textContent = k === "video" ? "Beschreibe eine Szene oder gib ein Startbild vor." : "Beschreibe dein Bild – oder lade ein Bild zum Bearbeiten hoch (je nach Modell).";
+  chips($("#computeSw"), [["local", { n: "🖥️ Mein PC" }], ["cloud", { n: "☁️ HuggingFace-Cloud" }]], state.compute[k], c => { state.compute[k] = c; store.set("compute", state.compute); renderStudio(); });
+  const isCloud = state.compute[k] === "cloud";
+  $("#cloudCard").classList.toggle("hidden", !isCloud);
+  $("#localCard").classList.toggle("hidden", isCloud);
+  $("#toolRow").classList.toggle("hidden", isCloud);
+  if(isCloud){ $("#noTool").classList.add("hidden"); $("#notReady").classList.add("hidden"); $("#studioBody").classList.remove("hidden"); renderCloudStudio(); return; }
+  $("#toolRow").classList.remove("hidden");
   $("#noTool").classList.toggle("hidden", list.length > 0);
   $("#studioBody").classList.toggle("hidden", !list.length);
   if(!list.length){
     const rec = state.catalog.length ? recommend(k) : [];
     $("#noTool").innerHTML = `<h3>${K.icon} Noch kein ${K.one}-Modell installiert</h3>
       <p class="hint" style="margin:0 0 12px">Wähle unter <b>Modelle</b> eins aus – es wird mit einem Klick heruntergeladen und eingerichtet.</p>
-      <div class="actions"><button class="btn pri" type="button" onclick="state.mKind='${k}';showTab('models')">Modelle ansehen</button></div>`;
+      <div class="actions"><button class="btn pri" type="button" onclick="state.mKind='${k}';showTab('models')">Modelle ansehen</button><button class="btn" type="button" onclick="state.compute['${k}']='cloud';store.set('compute',state.compute);renderStudio()">☁️ Oder in der Cloud erstellen – ohne Download</button></div>`;
     if(!state.catalog.length) loadCatalog(true).then(() => { if(state.tab === k && !toolsOf(k).length) renderStudio(); });
     else if(rec.length) $("#noTool").innerHTML += `<p class="hint" style="margin:14px 0 6px">Beliebt:</p><div class="actions">${rec.map(r => `<button class="btn" type="button" onclick="installTemplate('${esc(r.name)}')">${esc(r.title)} (~${GBf(r.size)})</button>`).join("")}</div>`;
     return;
@@ -584,7 +658,8 @@ function renderStudio(){
 }
 function updateGo(){
   const info = curInfo();
-  $("#go").disabled = !info || !!state.run || !online;
+  if($("#cGo")){ $("#cGo").disabled = !!state.run || !!cloud.run || !online; }
+  $("#go").disabled = !info || !!state.run || !!(typeof cloud !== "undefined" && cloud.run) || !online;
   $("#goHint").textContent = !online ? "ComfyUI läuft nicht." : state.run ? "Es wird gerade etwas erstellt …" : (info && !info.pos ? "Dieses Werkzeug braucht keinen Text – einfach die Eingabe auswählen und starten." : "");
 }
 $("#toolSel").onchange = e => { state.active[state.kind] = e.target.value; api("/easy/config", { active: state.active }); renderStudio(); };
@@ -757,8 +832,12 @@ function showResult(files){
   $("#resActions").classList.remove("hidden");
 }
 $("#go").onclick = generate;
-$("#again").onclick = () => { $("#seedRand").checked = true; $("#seed").disabled = true; generate(); };
+$("#again").onclick = () => {
+  if(state.compute[state.kind] === "cloud"){ $("#cSeedRand").checked = true; $("#cSeed").disabled = true; cloudGenerate(); return; }
+  $("#seedRand").checked = true; $("#seed").disabled = true; generate();
+};
 $("#stop").onclick = async () => {
+  if(cloud.run){ cloudCancel(); return; }
   const run = state.run; if(!run) return;
   try{ await api("/queue", { delete: [run.id] }); }catch(e){}
   try{ await fetch("/interrupt", { method: "POST" }); }catch(e){}
@@ -793,6 +872,698 @@ $("#aiWish").onkeydown = e => { if(e.key === "Enter"){ e.preventDefault(); $("#a
 $("#aiUse").onclick = () => { const v = $("#aiOut").value.trim(); if(v){ $("#prompt").value = v; $("#prompt").dispatchEvent(new Event("input")); } $("#aiBox").classList.add("hidden"); };
 $("#aiClose").onclick = () => $("#aiBox").classList.add("hidden");
 
+/* ================= Cloud (HuggingFace) ================= */
+// Drei Wege: Gratis (ZeroGPU-Spaces), pro Video bezahlen (Inference Providers), GPU mieten (eigener Space).
+// Alle Anfragen an HuggingFace laufen über ComfyUI auf deinem PC – der Schlüssel verlässt den PC nur Richtung HuggingFace.
+const cloud = {
+  tab: store.get("clTab", "free"), fKind: store.get("clFKind", "video"), task: store.get("clTask", "t2v"), lora: false, q: "", mq: "",
+  acct: null, wallet: null, setup: null, spaces: {}, models: {}, hw: null, rented: null, busy: false,
+  sel: store.get("cloudSel", { video: null, image: null }), recent: store.get("cloudRecent", []),
+  info: {}, ep: store.get("cloudEp", {}), vals: {}, run: null,
+  aspect: store.get("cAspect", { video: "16:9", image: "1:1" }), dur: store.get("cDur", {}), rentSpace: ""
+};
+state.compute = Object.assign({ video: "local", image: "local" }, store.get("compute", {}));
+const T = x => window.EG_I18N ? EG_I18N.tr(x) : x;
+const LIC_EU = "Lizenzhinweis: Die Lizenz der MiniMax-H3-Gewichte schließt die Nutzung in der EU, im Vereinigten Königreich, Südkorea und den USA aus. Bitte prüfe, ob du das Modell nutzen darfst.\n\nTrotzdem benutzen?";
+const usd = v => v == null || isNaN(v) ? "–" : "$" + (v !== 0 && Math.abs(v) < 0.1 ? v.toFixed(3) : v.toFixed(2));
+const HFL = {
+  billing: "https://huggingface.co/settings/billing", join: "https://huggingface.co/join", pro: "https://huggingface.co/subscribe/pro",
+  tokWrite: "https://huggingface.co/settings/tokens/new?tokenType=write&description=Easy%20Generate",
+  tokSpace: "https://huggingface.co/settings/tokens/new?tokenType=fineGrained&description=Easy%20Generate%20Spaces",
+  usage: "https://huggingface.co/settings/inference-providers/overview", spaces: "https://huggingface.co/spaces"
+};
+const TASKN = { t2v: "Text → Video", i2v: "Bild → Video", t2i: "Text → Bild", i2i: "Bild bearbeiten" };
+const TASKK = { t2v: "video", i2v: "video", t2i: "image", i2i: "image" };
+const REF = [ // Beispiele für „Wofür reicht es?“
+  { n: "Video 5 s · Wan 2.2 (720p)", id: "Wan-AI/Wan2.2-T2V-A14B", usd: 0.40, u: "v" },
+  { n: "Video 5 s · LTX-2", id: "Lightricks/LTX-2", usd: 0.30, u: "v" },
+  { n: "Video 5 s · MiniMax H3", id: "larryvrh/MiniMax-H3-Turbo-Lora", usd: 0.50, u: "v" },
+  { n: "Bild · FLUX / Qwen-Image", id: "black-forest-labs/FLUX.1-dev", usd: 0.025, u: "i" },
+];
+
+function cloudErr(e){
+  const s = String(e || "Fehler"), code = s.split("|")[0], rest = s.includes("|") ? s.slice(s.indexOf("|") + 1) : "";
+  const det = rest.replace(/^\d*\|/, "");
+  const M = {
+    SETUP: "Die Cloud-Bausteine sind noch nicht installiert (oben unter ☁️ Cloud, ein Klick).",
+    AUTH: "HuggingFace hat den Schlüssel abgelehnt oder es ist keiner hinterlegt. Prüfe den Schlüssel unter ☁️ Cloud.",
+    PAYMENT: "Nicht genug Guthaben bei HuggingFace. Lade Guthaben auf (☁️ Cloud → „Guthaben aufladen“).",
+    FORBIDDEN: "Zugriff verweigert – der Schlüssel hat dafür nicht genug Rechte oder das Modell ist gesperrt.",
+    RATE: "Zu viele Anfragen – kurz warten und nochmal versuchen.",
+    QUEUE_FULL: "Der Space ist gerade überlastet. Versuch einen anderen oder später nochmal.",
+    SPACE_DOWN: "Dieser Space ist gerade pausiert, schläft oder ist defekt. Wähle einen anderen (oder starte deinen gemieteten Space).",
+    NO_OUTPUT: "Der Space hat kein Bild und kein Video zurückgegeben.",
+    OFFLINE: "Keine Verbindung zu HuggingFace. Bist du online?",
+    SAME_TOKEN: "Bitte für die Spaces einen eigenen Schlüssel ohne Rechte anlegen – nicht den Haupt-Schlüssel."
+  };
+  if(code === "ZEROGPU_QUOTA"){
+    const m = s.match(/^ZEROGPU_QUOTA\|(\d*)/);
+    return "Dein kostenloses GPU-Tageskontingent bei HuggingFace ist aufgebraucht" + (m && m[1] ? ` (noch ${m[1]} s übrig, dieses Video bräuchte mehr)` : "") + ".\n→ Morgen gibt es neues Kontingent, mit HuggingFace PRO 8× mehr – oder nimm „💳 Pro Video bezahlen“ bzw. „🖥️ GPU mieten“.";
+  }
+  if(M[code]) return M[code] + (det ? "\n\n" + det.slice(0, 400) : "");
+  return s.slice(0, 600);
+}
+function extLink(url, text, cls){ return `<a class="${cls || ""}" href="${esc(url)}" target="_blank" rel="noopener">${text}</a>`; }
+
+/* ---------- Konto ---------- */
+async function loadAccount(force){
+  cloud.acct = await api("/easy/cloud/account" + (force ? "?force=1" : ""));
+  if(host && host.hfWallet && cloud.acct.token_set && !cloud.acct.error){ try{ cloud.wallet = await host.hfWallet(); }catch(e){ cloud.wallet = null; } }
+  return cloud.acct;
+}
+function available(){ const r = availableRaw(); return r && r.partial && r.v <= 0 ? null : r; }
+function availableRaw(){
+  const a = cloud.acct || {};
+  const spent = (a.usage && a.usage.total) || 0;
+  const inc = Math.max(0, (a.included || 0) - spent);
+  const w = cloud.wallet && typeof cloud.wallet.balance === "number" ? cloud.wallet.balance : null;
+  if(w == null) return a.usage || a.included ? { v: inc, partial: true } : null;
+  return { v: w + inc, partial: false };
+}
+function learnedUsd(id, units){
+  const c = (cloud.acct && cloud.acct.costs || {})[id];
+  return c && c.per_unit ? c.per_unit * units : null;
+}
+async function saveToken(field, val, msgEl){
+  val = (val || "").trim();
+  if(!/^hf_[A-Za-z0-9]{20,}$/.test(val)){ msgEl.innerHTML = `<div class="msg err">Das sieht nicht wie ein HuggingFace-Schlüssel aus (beginnt mit „hf_“).</div>`; return false; }
+  const r = await api("/easy/config", { [field]: val });
+  if(r.error){ msgEl.innerHTML = `<div class="msg err">${esc(cloudErr(r.error))}</div>`; return false; }
+  state.cfg = r;
+  return true;
+}
+function renderAccount(){
+  const a = cloud.acct || {}, el = $("#clAcct");
+  if(!a.token_set || a.error === "AUTH"){
+    el.innerHTML = `<h3>🔑 HuggingFace-Konto verbinden</h3>
+      ${a.error === "AUTH" ? `<div class="msg err" style="margin-bottom:8px">Der gespeicherte Schlüssel wurde abgelehnt (abgelaufen oder gelöscht). Bitte neuen eintragen.</div>` : ""}
+      <p class="hint" style="margin:0 0 6px">Einmalig, ca. 2 Minuten. Bezahlt wird direkt bei HuggingFace – Easy Generate zeigt nur Guthaben und Verbrauch an.</p>
+      <ol class="steps">
+        <li>Kostenloses Konto anlegen oder anmelden: ${extLink(HFL.join, "huggingface.co/join")}</li>
+        <li>Schlüssel erstellen: ${extLink(HFL.tokWrite, "Neuen Schlüssel anlegen")} <span>– Typ „Write“ lassen, unten „Create token“ klicken.</span></li>
+        <li>Schlüssel hier einfügen:</li>
+      </ol>
+      <div class="row" style="margin-top:6px"><input type="password" id="clTok" placeholder="hf_…" autocomplete="off"><button class="btn pri" type="button" id="clTokSave">Speichern</button></div>
+      <div id="clTokMsg" style="margin-top:8px"></div>
+      <p class="hint" style="margin:10px 0 0">🔒 Der Schlüssel wird nur auf deinem PC gespeichert und ausschließlich an HuggingFace geschickt.</p>`;
+    $("#clTokSave").onclick = async () => { if(await saveToken("hf_token", $("#clTok").value, $("#clTokMsg"))){ await loadAccount(true); renderCloud(); } };
+    return;
+  }
+  if(a.error){
+    el.innerHTML = `<h3>HuggingFace-Konto</h3><div class="msg err">${esc(cloudErr(a.error))}</div><div class="actions" style="margin-top:10px"><button class="btn" type="button" id="clRe">Erneut versuchen</button></div>`;
+    $("#clRe").onclick = async () => { await loadAccount(true); renderCloud(); };
+    return;
+  }
+  const u = a.user || {}, w = cloud.wallet, us = a.usage, av = available();
+  let wal;
+  if(w && typeof w.balance === "number") wal = `<div class="money">${usd(w.balance)}</div><div class="hint">Guthaben (Prepaid-Credits) bei HuggingFace</div>`;
+  else if(host && host.hfLogin) wal = `<div class="hint" style="margin-bottom:6px">Das Guthaben zeigt HuggingFace nur nach Anmeldung an.</div><button class="btn pri" type="button" id="clLogin">Bei HuggingFace anmelden, um das Guthaben zu sehen</button>`;
+  else wal = `<div class="hint">Guthaben ansehen: ${extLink(HFL.billing, "huggingface.co/settings/billing")}</div>`;
+  const period = us && us.period && us.period.periodEnd ? new Date(us.period.periodEnd).toLocaleDateString() : "";
+  const catNames = { Endpoints: "Inference Endpoints", Spaces: "Gemietete Spaces (GPU)", "Inference Providers": "Pro Video / Bild (Anbieter)", Jobs: "Jobs", ZeroGPU: "ZeroGPU über Kontingent" };
+  const cats = us ? Object.entries(us.cats || {}).filter(([, v]) => v > 0).map(([k, v]) => `<div class="kv"><span>${esc(catNames[k] || k)}</span><span>${usd(v)}</span></div>`).join("") : "";
+  const role = a.token_role, st = a.space_token;
+  el.innerHTML = `<div class="row" style="margin-bottom:10px">${u.avatar ? `<img class="avatar" src="${esc(u.avatar)}" alt="">` : `<div class="avatar"></div>`}
+      <div style="flex:1;min-width:0"><b>${esc(u.fullname || u.name)}</b> <span class="bdg ${u.isPro ? "pay" : ""}">${u.isPro ? "PRO" : "Kostenloses Konto"}</span><div class="hint">@${esc(u.name)} · Schlüssel: ${esc(role === "write" ? "Write" : role === "read" ? "Read" : role === "fineGrained" ? "Fein abgestuft" : role || "?")}</div></div>
+      <button class="btn" type="button" id="clRefresh" title="Aktualisieren">↻</button></div>
+    ${wal}
+    <div style="margin-top:12px">
+      ${a.included ? `<div class="kv"><span>Inklusive (PRO) pro Monat</span><span>${usd(a.included)}</span></div>` : ""}
+      ${us ? `<div class="kv"><span>Verbraucht${period ? " bis " + esc(period) : " in diesem Monat"}</span><span>${usd(us.total)}</span></div>${cats}` : a.usage_error === "PERM" ? `<div class="hint">Verbrauch nicht lesbar – dem Schlüssel fehlt das Recht „Abrechnung lesen“.</div>` : ""}
+      ${av ? `<div class="kv"><span><b>Verfügbar ${av.partial ? "(ohne Prepaid-Guthaben)" : ""}</b></span><span><b>${usd(av.v)}</b></span></div>` : ""}
+      ${u.isPro && us ? `<div class="hint" style="margin-top:4px">Die ${usd(a.included)} inklusive werden zuerst verbraucht, danach dein Guthaben.</div>` : ""}
+    </div>
+    ${role === "read" ? `<div class="msg warn" style="margin-top:10px">Dein Schlüssel ist vom Typ „Read“. Für „GPU mieten“ braucht er Typ „Write“: ${extLink(HFL.tokWrite, "neuen Schlüssel anlegen")}</div>` : ""}
+    <div class="actions" style="margin-top:12px">
+      ${extLink(HFL.billing, "💳 Guthaben aufladen", "btn pri")}
+      ${!u.isPro ? extLink(HFL.pro, "PRO holen ($9/Monat)", "btn") : ""}
+      ${extLink(HFL.usage, "Verbrauch im Detail", "btn")}
+      ${w && typeof w.balance === "number" && host && host.hfLogout ? `<button class="btn" type="button" id="clLogout">Abmelden</button>` : ""}
+      <button class="btn" type="button" id="clTokChange">Schlüssel ändern</button>
+    </div>
+    <div id="clTokBox" class="hidden" style="margin-top:10px"><div class="row"><input type="password" id="clTok2" placeholder="hf_…" autocomplete="off"><button class="btn pri" type="button" id="clTokSave2">Speichern</button></div><div id="clTokMsg2" style="margin-top:6px"></div></div>
+    <details style="margin-top:14px" ${!st ? "" : ""}><summary>🆓 Gratis-Kontingent deines Kontos nutzen ${st && st.ok ? "✓" : ""}</summary>
+      <p class="hint" style="margin:8px 0"><span>Gratis-Spaces sind Programme anderer Leute. Deshalb bekommen sie nie deinen Haupt-Schlüssel, sondern einen eigenen Schlüssel ohne Rechte.</span> <span>Der zeigt HuggingFace nur, wer du bist, damit dein Tageskontingent (${a.zerogpu_min || 5} Min. GPU) gilt.</span> <span>Ohne diesen Schlüssel funktionieren die Spaces trotzdem, aber mit kleinerem Gast-Kontingent.</span></p>
+      <ol class="steps">
+        <li>${extLink(HFL.tokSpace, "Schlüssel „Fein abgestuft“ anlegen")} <span>– keine Haken setzen (für gemietete Spaces nur: „Read access to contents of all repos under your personal namespace“), dann „Create token“.</span></li>
+        <li>Hier einfügen:</li>
+      </ol>
+      <div class="row"><input type="password" id="clSTok" placeholder="${state.cfg.hf_space_token_set ? "gespeichert ✓ – zum Ersetzen neu einfügen" : "hf_…"}" autocomplete="off"><button class="btn" type="button" id="clSTokSave">Speichern</button></div>
+      ${st && st.ok && st.role === "write" ? `<div class="msg err" style="margin-top:6px">Dieser Space-Schlüssel hat Schreibrechte – bitte einen ohne Rechte anlegen!</div>` : ""}
+      ${st && st.ok === false ? `<div class="msg err" style="margin-top:6px">Der Space-Schlüssel wurde abgelehnt.</div>` : ""}
+      <div id="clSTokMsg" style="margin-top:6px"></div>
+    </details>`;
+  $("#clRefresh").onclick = async () => { $("#clRefresh").disabled = true; await loadAccount(true); renderCloud(); };
+  $("#clTokChange").onclick = () => $("#clTokBox").classList.toggle("hidden");
+  $("#clTokSave2").onclick = async () => { if(await saveToken("hf_token", $("#clTok2").value, $("#clTokMsg2"))){ await loadAccount(true); renderCloud(); } };
+  $("#clSTokSave").onclick = async () => { if(await saveToken("hf_space_token", $("#clSTok").value, $("#clSTokMsg"))){ $("#clSTok").value = ""; await loadAccount(true); renderCloud(); } };
+  if($("#clLogin")) $("#clLogin").onclick = async () => { const ok = await host.hfLogin(); if(ok){ cloud.wallet = await host.hfWallet(); renderCloud(); } };
+  if($("#clLogout")) $("#clLogout").onclick = async () => { await host.hfLogout(); cloud.wallet = null; renderCloud(); };
+}
+function renderReach(){
+  const a = cloud.acct || {}, el = $("#clReach"), av = available();
+  const zl = a.zgpu_left && Date.now() / 1000 - a.zgpu_left.at < 20 * 3600 ? a.zgpu_left : null;
+  const hw = (cloud.hw || []).filter(h => /L40S|A100|L4|A10G/.test(h.pretty) && !/[248]x/i.test(h.pretty)).slice(0, 3);
+  const lines = [];
+  for(const r of REF){
+    const price = learnedUsd(r.id, r.u === "v" ? 5 : 1) || r.usd;
+    const n = av ? Math.floor(av.v / price) : null;
+    lines.push(`<div class="kv"><span><span>${esc(r.n)}</span> <span class="hint">ca. ${usd(price)}</span></span><span>${n != null ? `≈ <b>${n}</b> <span>${r.u === "v" ? (n === 1 ? "Video" : "Videos") : (n === 1 ? "Bild" : "Bilder")}</span>` : ""}</span></div>`);
+  }
+  for(const h of hw){
+    const hrs = av && h.per_hour ? av.v / h.per_hour : null;
+    lines.push(`<div class="kv"><span>GPU mieten · ${esc(h.pretty)} <span class="hint">${usd(h.per_hour)}/Std.</span></span><span>${hrs != null ? `≈ <b>${hrs >= 10 ? Math.floor(hrs) : hrs.toFixed(1).replace(".", ",")}</b> Std.` : ""}</span></div>`);
+  }
+  el.innerHTML = `<h3>⏳ Wofür reicht es?</h3>
+    <div class="kv"><span>🆓 Gratis (ZeroGPU-Spaces)</span><span>ca. <b>${a.zerogpu_min || 5} Min.</b> GPU pro Tag</span></div>
+    <p class="hint" style="margin:4px 0 10px">Reicht meist für 2–8 kurze Videos am Tag, je nach Space. ${a.user && !a.user.isPro ? "Mit PRO 40 Min. pro Tag." : ""}${zl ? ` Zuletzt gemeldet: noch ${zl.seconds} s übrig.` : ""}</p>
+    ${lines.join("")}
+    <p class="hint" style="margin:8px 0 0"><span>${av ? (av.partial ? "Ohne dein Prepaid-Guthaben gerechnet – melde dich links an, dann wird es mitgezählt." : "") : a.token_set ? (host && host.hfLogin ? "Melde dich links bei HuggingFace an, dann siehst du, wie lange dein Guthaben reicht." : "") : "Verbinde dein Konto, dann siehst du, wie lange dein Guthaben reicht."}</span> <span>Preise sind Richtwerte der Anbieter; nach deinen ersten Erstellungen rechnet Easy Generate mit deinen echten Kosten.</span></p>`;
+}
+
+/* ---------- Bausteine einmalig installieren ---------- */
+async function checkSetup(){
+  cloud.setup = await api("/easy/cloud/setup");
+  const el = $("#clSetup");
+  if(cloud.setup.ready && !cloud.setup.running){ el.classList.add("hidden"); return true; }
+  el.classList.remove("hidden");
+  if(cloud.setup.running){
+    el.className = "msg warn"; el.innerHTML = `⏳ Installiere Cloud-Bausteine … <span class="hint">${esc((cloud.setup.log || []).slice(-1)[0] || "")}</span>`;
+    setTimeout(async () => { if(await checkSetup() && state.tab === "cloud") renderCloud(); }, 1500);
+    return false;
+  }
+  el.className = cloud.setup.error ? "msg err" : "msg warn";
+  el.innerHTML = `${cloud.setup.error ? "Installation fehlgeschlagen: " + esc(cloud.setup.error) + "<br>" : ""}Für die Cloud braucht Easy Generate einmalig zwei kleine Bausteine (ca. 35 MB, offizielle HuggingFace-Bibliotheken). <button class="btn pri" type="button" id="clSetupGo">Jetzt installieren</button>`;
+  $("#clSetupGo").onclick = async () => { await api("/easy/cloud/setup", {}); checkSetup(); };
+  return false;
+}
+
+/* ---------- Cloud-Seite ---------- */
+async function renderCloud(){
+  chips($("#clTabs"), [["free", { n: "🆓 Gratis", sub: "ZeroGPU-Spaces" }], ["pay", { n: "💳 Pro Video bezahlen", sub: "über dein HF-Guthaben" }], ["rent", { n: "🖥️ GPU mieten", sub: "pro Stunde, eigener Space" }]], cloud.tab,
+    t => { cloud.tab = t; store.set("clTab", t); renderCloud(); });
+  checkSetup();
+  if(!cloud.acct) { renderAccount(); await loadAccount(); }
+  if(!cloud.hw) api("/easy/cloud/hardware").then(j => { cloud.hw = j.items || []; if(state.tab === "cloud"){ renderReach(); if(cloud.tab === "rent") renderRent(); } });
+  renderAccount(); renderReach();
+  if(cloud.tab === "free") renderFree();
+  else if(cloud.tab === "pay") renderPay();
+  else renderRent();
+}
+function useCloud(kind, sel){
+  sel = Object.assign({ kind }, sel);
+  state.compute[kind] = "cloud"; store.set("compute", state.compute);
+  cloud.sel[kind] = sel; store.set("cloudSel", cloud.sel);
+  cloud.recent = [sel].concat(cloud.recent.filter(x => !(x.id === sel.id && x.mode === sel.mode && x.task === sel.task))).slice(0, 12);
+  store.set("cloudRecent", cloud.recent);
+  showTab(kind);
+}
+window.useCloud = useCloud;
+
+async function renderFree(){
+  const pane = $("#clPane"), k = cloud.fKind;
+  pane.innerHTML = `<div class="toolbar"><div class="chips" id="clFK"></div>
+      <input type="text" id="clQ" placeholder="Spaces suchen … (z. B. wan, ltx, flux)" value="${esc(cloud.q)}"><button class="btn" type="button" id="clQGo">Suchen</button></div>
+    <div class="row" style="margin:-4px 0 14px;max-width:720px"><input type="text" id="clUrl" placeholder="Eigene Space-Adresse, z. B. https://huggingface.co/spaces/Lightricks/LTX-2-3"><button class="btn pri" type="button" id="clUrlGo">Benutzen</button></div>
+    <p class="hint" style="margin:-6px 0 12px">Gratis-Spaces laufen auf geteilten Grafikkarten von HuggingFace (ZeroGPU). Bei viel Andrang gibt es eine Warteschlange. Jeder Space ist ein eigenes kleines Programm – die Einstellungen werden automatisch erkannt.</p>
+    <div class="clist" id="clList"><div class="hint">Lade Spaces …</div></div>`;
+  chips($("#clFK"), [["video", { n: "🎬 Video" }], ["image", { n: "🖼️ Bild" }]], k, x => { cloud.fKind = x; store.set("clFKind", x); renderFree(); });
+  const go = () => { cloud.q = $("#clQ").value.trim(); renderFree(); };
+  $("#clQGo").onclick = go; $("#clQ").onkeydown = e => { if(e.key === "Enter") go(); };
+  $("#clUrlGo").onclick = () => {
+    const v = $("#clUrl").value.trim();
+    const m = v.match(/huggingface\.co\/spaces\/([\w.\-]+\/[\w.\-]+)/) || v.match(/^([\w.\-]+\/[\w.\-]+)$/);
+    const id = m ? m[1] : (/^https?:\/\/[\w.\-]+\.hf\.space/.test(v) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?/.test(v) ? v.split("?")[0].replace(/\/$/, "") : null);
+    if(!id){ toast("Das ist keine gültige Space-Adresse.", "err"); return; }
+    useCloud(k, { mode: "space", id, title: id.split("/").pop(), zero: true });
+  };
+  const key = k + ":" + cloud.q;
+  if(!cloud.spaces[key]){
+    const j = await api("/easy/cloud/spaces?kind=" + k + (cloud.q ? "&q=" + encodeURIComponent(cloud.q) : ""));
+    if(j.error && !(j.items || []).length){ $("#clList").innerHTML = `<div class="msg err">${esc(cloudErr("OFFLINE|" + j.error))}</div>`; return; }
+    cloud.spaces[key] = j.items || [];
+  }
+  if(state.tab !== "cloud" || cloud.tab !== "free" || cloud.fKind !== k) return;
+  const list = $("#clList"); list.innerHTML = "";
+  if(!cloud.spaces[key].length){ list.innerHTML = `<div class="hint">Nichts gefunden.</div>`; return; }
+  for(const sp of cloud.spaces[key].slice(0, 60)){
+    const d = document.createElement("div"); d.className = "ci";
+    d.innerHTML = `<div class="tt">${esc(sp.emoji || (k === "video" ? "🎬" : "🖼️"))} ${esc(sp.title)}</div>
+      <div class="id">${esc(sp.id)} · ♥ ${sp.likes}</div>
+      ${sp.desc ? `<div class="ds">${esc(sp.desc)}</div>` : ""}
+      <div class="bd2">${sp.recommended ? `<span class="bdg pay">★ Empfohlen</span>` : ""}${sp.zero ? `<span class="bdg free">Gratis · ZeroGPU</span>` : `<span class="bdg">${esc(sp.hardware || "CPU")}</span>`}${sp.license_eu ? `<span class="bdg warn">⚠ Lizenz: nicht in der EU</span>` : ""}</div>
+      <div class="ac"><button class="btn pri" type="button">Benutzen</button>${extLink("https://huggingface.co/spaces/" + sp.id, "Ansehen ↗", "btn")}<button class="btn" type="button">🖥️ Mieten</button></div>`;
+    const [use, , rent] = d.querySelectorAll(".ac > *");
+    use.onclick = () => {
+      if(sp.license_eu && !confirm(T(LIC_EU))) return;
+      useCloud(k, { mode: "space", id: sp.id, title: sp.title, zero: sp.zero });
+    };
+    rent.onclick = () => { cloud.rentSpace = sp.id; cloud.tab = "rent"; store.set("clTab", "rent"); renderCloud(); };
+    list.appendChild(d);
+  }
+}
+
+async function renderPay(){
+  const pane = $("#clPane"), t = cloud.task;
+  pane.innerHTML = `<div class="toolbar"><div class="chips" id="clTask"></div>
+      <input type="text" id="clMQ" placeholder="Modell suchen … (z. B. wan, ltx, hunyuan)" value="${esc(cloud.mq)}">
+      <label class="row hint" style="gap:6px"><input type="checkbox" id="clLora" ${cloud.lora ? "checked" : ""}> auch Stil-Varianten (LoRAs)</label></div>
+    <p class="hint" style="margin:-6px 0 12px">Abgerechnet wird pro Video bzw. Bild direkt über dein HuggingFace-Guthaben – zum Preis des Anbieters, ohne Aufschlag. Keine Warteschlange, keine Tageslimits.</p>
+    <div class="clist" id="clMList"><div class="hint">Lade Modelle …</div></div>`;
+  chips($("#clTask"), Object.entries(TASKN).map(([x, n]) => [x, { n }]), t, x => { cloud.task = x; store.set("clTask", x); renderPay(); });
+  $("#clMQ").oninput = e => { cloud.mq = e.target.value; drawPay(); };
+  $("#clLora").onchange = e => { cloud.lora = e.target.checked; drawPay(); };
+  if(!cloud.models[t]){
+    const j = await api("/easy/cloud/models?task=" + t);
+    if(j.error && !(j.items || []).length){ $("#clMList").innerHTML = `<div class="msg err">${esc(cloudErr("OFFLINE|" + j.error))}</div>`; return; }
+    cloud.models[t] = j.items || [];
+  }
+  if(state.tab === "cloud" && cloud.tab === "pay" && cloud.task === t) drawPay();
+}
+function unitPrice(m, task){ // Preis für ein typisches Ergebnis (Video 5 s, 1 Bild)
+  const units = TASKK[task] === "video" ? 5 : 1;
+  const l = m.learned && m.learned.per_unit ? m.learned.per_unit * units : null;
+  return { usd: l || (m.price.unit === "s" ? m.price.usd * units : m.price.usd), learned: !!l };
+}
+function drawPay(){
+  const t = cloud.task, all = cloud.models[t] || [], q = cloud.mq.toLowerCase().trim(), av = available();
+  const list = $("#clMList"); if(!list) return;
+  const items = all.filter(m => (cloud.lora || !m.lora) && (!q || m.id.toLowerCase().includes(q) || m.providers.some(p => (p.id || "").toLowerCase().includes(q))));
+  const nLora = all.filter(m => m.lora).length;
+  list.innerHTML = items.length ? "" : `<div class="hint">Keine Modelle gefunden${!cloud.lora && nLora ? ` – es gibt noch ${nLora} Stil-Varianten (Haken oben)` : ""}.</div>`;
+  for(const m of items.slice(0, 120)){
+    const p = unitPrice(m, t), n = av ? Math.floor(av.v / p.usd) : null;
+    const d = document.createElement("div"); d.className = "ci";
+    d.innerHTML = `<div class="tt">${TASKK[t] === "video" ? "🎬" : "🖼️"} ${esc(m.id.split("/").pop())}</div>
+      <div class="id">${esc(m.id)} · ♥ ${m.likes}</div>
+      <div class="bd2">${m.pinned ? `<span class="bdg pay">★ Empfohlen</span>` : ""}${m.lora ? `<span class="bdg">Stil-Variante</span>` : ""}${m.providers.map(x => `<span class="bdg">${esc(x.provider)}</span>`).join("")}${m.license_eu ? `<span class="bdg warn">⚠ Lizenz: nicht in der EU</span>` : ""}</div>
+      <div class="hint"><span>${p.learned ? "Deine echten Kosten" : "ca."}</span> <b>${usd(p.usd)}</b> <span>${TASKK[t] === "video" ? "pro 5-s-Video" : "pro Bild"}</span>${n != null ? ` · <span>Guthaben reicht für</span> ≈ <b>${n}</b>` : ""}</div>
+      <div class="ac"><button class="btn pri" type="button">Benutzen</button>${extLink("https://huggingface.co/" + m.id, "Modell ↗", "btn")}</div>`;
+    d.querySelector(".btn.pri").onclick = () => {
+      if(m.license_eu && !confirm(T(LIC_EU))) return;
+      useCloud(TASKK[t], { mode: "provider", task: t, id: m.id, title: m.id.split("/").pop(), provider: m.providers[0].provider, providers: m.providers.map(x => x.provider), price: m.price });
+    };
+    list.appendChild(d);
+  }
+}
+
+async function renderRent(){
+  const pane = $("#clPane");
+  const a = cloud.acct || {};
+  pane.innerHTML = `<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr))">
+    <div class="card"><h3>Neue GPU mieten</h3>
+      <p class="hint" style="margin:0 0 8px"><span>Easy Generate kopiert einen Space in dein HuggingFace-Konto (privat) und gibt ihm eine eigene Grafikkarte – keine Warteschlange, keine Tageslimits.</span> <span>Bezahlt wird pro Minute, solange er läuft. Ohne Nutzung schläft er nach der eingestellten Zeit von selbst ein und kostet dann nichts.</span></p>
+      <label class="l">Space (Programm), das auf der GPU laufen soll</label>
+      <input type="text" id="rSpace" list="rSpaceList" placeholder="z. B. Lightricks/LTX-2-3" value="${esc(cloud.rentSpace)}">
+      <datalist id="rSpaceList">${["Lightricks/LTX-2-3", "Lightricks/ltx-video-distilled", "zerogpu-aoti/wan2-2-fp8da-aoti-faster", "multimodalart/wan2-1-fast", "MiniMaxAI/MiniMax-H3-Turbo-Lora", "Qwen/Qwen-Image-2.1", "black-forest-labs/flux-3-image-klein", "Tongyi-MAI/Z-Image-Turbo"].map(x => `<option value="${x}">`).join("")}</datalist>
+      <label class="l">Grafikkarte</label>
+      <select class="sel" id="rHw"></select>
+      <label class="l">Automatisch einschlafen nach</label>
+      <select class="sel" id="rSleep"><option value="900">15 Min. ohne Nutzung (empfohlen)</option><option value="1800">30 Min.</option><option value="3600">1 Std.</option><option value="7200">2 Std.</option></select>
+      <div class="hint" id="rCost" style="margin-top:10px"></div>
+      <button class="big" id="rGo" type="button">GPU mieten</button>
+      <div id="rMsg" style="margin-top:8px"></div>
+      <p class="hint" style="margin:10px 0 0">Tipp: Video-Modelle wie Wan 2.2 14B oder MiniMax H3 brauchen viel Grafikspeicher – nimm mindestens 48 GB (L40S) oder 80 GB (A100).</p>
+    </div>
+    <div class="card"><h3>Deine gemieteten GPUs</h3><div id="rList" class="slots"><span class="hint">Lade …</span></div>
+      <label class="row hint" style="gap:6px;margin-top:12px"><input type="checkbox" id="rPauseExit"> Beim Beenden von Easy Generate alle pausieren (keine Kosten mehr)</label>
+    </div></div>`;
+  const hwSel = $("#rHw");
+  const hws = cloud.hw || [];
+  hwSel.innerHTML = hws.length ? hws.map(h => `<option value="${esc(h.name)}">${esc(h.pretty)} · ${esc(h.vram || "")} · ${usd(h.per_hour)}/Std.</option>`).join("") : `<option value="l40sx1">Nvidia L40S (48 GB)</option>`;
+  const def = hws.find(h => h.name === "l40sx1") || hws.find(h => /L40S/.test(h.pretty)) || hws[0];
+  if(def) hwSel.value = def.name;
+  const cost = () => {
+    const h = hws.find(x => x.name === hwSel.value), av = available();
+    $("#rCost").innerHTML = h ? `<div>Kosten: <b>${usd(h.per_hour)}/Std.</b></div>${av ? `<div>Dein Guthaben reicht für ≈ <b>${(av.v / h.per_hour).toFixed(1).replace(".", ",")} Std.</b></div>` : ""}<div>Der erste Start dauert einige Minuten (Space wird gebaut, Modell geladen) – auch diese Zeit kostet.</div>` : "";
+  };
+  hwSel.onchange = cost; cost();
+  $("#rGo").onclick = async () => {
+    const sp = $("#rSpace").value.trim().replace(/^https?:\/\/huggingface\.co\/spaces\//, "").replace(/\/$/, "");
+    if(!/^[\w.\-]+\/[\w.\-]+$/.test(sp)){ $("#rMsg").innerHTML = `<div class="msg err">Bitte einen Space angeben, z. B. Lightricks/LTX-2-3.</div>`; return; }
+    if(!a.token_set){ $("#rMsg").innerHTML = `<div class="msg err">${esc(cloudErr("AUTH"))}</div>`; return; }
+    const h = hws.find(x => x.name === hwSel.value);
+    if(!confirm(T(`„${sp}“ auf ${h ? h.pretty : hwSel.value} mieten?`) + "\n\n" + T(`Kosten: ${h ? usd(h.per_hour) : "?"} pro Stunde, solange der Space läuft. Ohne Nutzung schläft er automatisch ein.`))) return;
+    $("#rGo").disabled = true; $("#rMsg").innerHTML = `<span class="hint">Richte ein …</span>`;
+    const r = await api("/easy/cloud/rent", { space: sp, hardware: hwSel.value, sleep: +$("#rSleep").value });
+    $("#rGo").disabled = false;
+    if(r.error){ $("#rMsg").innerHTML = `<div class="msg err">${esc(cloudErr(r.error))}</div>`; return; }
+    $("#rMsg").innerHTML = `<div class="msg ok">✅ ${esc(r.id)} wird gestartet. Das dauert beim ersten Mal ein paar Minuten – du kannst ihn schon im Studio auswählen.</div>`;
+    cloud.rentSpace = "";
+    drawRented();
+  };
+  $("#rPauseExit").onchange = e => api("/easy/cloud/rented/pause_on_exit", { value: e.target.checked });
+  drawRented();
+}
+const STAGE = {
+  RUNNING: ["läuft", "pay"], RUNNING_BUILDING: ["läuft (baut neu)", "pay"], BUILDING: ["wird gebaut", "pay"], APP_STARTING: ["startet", "pay"], RUNNING_APP_STARTING: ["startet", "pay"],
+  SLEEPING: ["schläft – kostenlos", "free"], PAUSED: ["pausiert – kostenlos", "free"], STOPPED: ["gestoppt – kostenlos", "free"],
+  BUILD_ERROR: ["Fehler beim Bauen", "warn"], RUNTIME_ERROR: ["Fehler beim Starten", "warn"], CONFIG_ERROR: ["Fehler", "warn"], GONE: ["gelöscht", "warn"], ERROR: ["nicht erreichbar", "warn"], UNKNOWN: ["unbekannt", ""]
+};
+let rentTimer = null;
+async function drawRented(){
+  clearTimeout(rentTimer);
+  const j = await api("/easy/cloud/rented");
+  cloud.rented = j.items || [];
+  const el = $("#rList"); if(!el) return;
+  if($("#rPauseExit")) $("#rPauseExit").checked = j.pause_on_exit !== false;
+  const running = cloud.rented.filter(x => x.billing);
+  $("#clBadge").classList.toggle("hidden", !running.length); $("#clBadge").textContent = running.length ? "$" : "";
+  if(!cloud.rented.length){ el.innerHTML = `<span class="hint">Noch keine. Links eine GPU mieten.</span>`; return; }
+  el.innerHTML = "";
+  for(const x of cloud.rented){
+    const [txt, cls] = STAGE[x.stage] || [x.stage || "?", ""];
+    const d = document.createElement("div"); d.className = "ci";
+    d.innerHTML = `<div class="tt">🖥️ ${esc(x.id.split("/").pop())}</div><div class="id">${esc(x.id)} · Vorlage: ${esc(x.from || "")}</div>
+      <div class="bd2"><span class="bdg ${cls}">${esc(txt)}</span><span class="bdg rent">${esc(x.pretty || "")}${x.per_hour != null ? " · " + usd(x.per_hour) + "/Std." : ""}</span>${x.sleep ? `<span class="bdg">schläft nach ${Math.round(x.sleep / 60)} Min.</span>` : ""}</div>
+      ${x.billing ? `<div class="hint">💸 Kostet gerade ${usd(x.per_hour)} pro Stunde.</div>` : ""}
+      <div class="ac"><button class="btn pri" type="button" data-a="use">Benutzen</button>
+        ${x.billing ? `<button class="btn" type="button" data-a="pause">⏸ Pausieren</button>` : x.stage !== "GONE" ? `<button class="btn" type="button" data-a="start">▶ Starten</button>` : ""}
+        <button class="btn" type="button" data-a="hw">GPU ändern</button>
+        <button class="btn danger" type="button" data-a="delete">Löschen</button></div>`;
+    d.querySelectorAll("[data-a]").forEach(b => b.onclick = async () => {
+      const act = b.dataset.a;
+      if(act === "use"){ const k = /image|flux|qwen-image|z-image|sdxl|klein/i.test(x.from || x.id) ? "image" : "video"; useCloud(k, { mode: "space", id: x.id, title: x.id.split("/").pop(), rented: true, per_hour: x.per_hour }); return; }
+      if(act === "delete" && !confirm(T(`„${x.id}“ endgültig löschen?`) + "\n\n" + T("Er kostet danach nichts mehr; zum erneuten Nutzen musst du ihn neu mieten."))) return;
+      let body = { space: x.id };
+      if(act === "hw"){
+        const v = await pickHardware(x.requested || x.current || x.hardware);
+        if(!v) return; body.hardware = v;
+      }
+      b.disabled = true;
+      const r = await api("/easy/cloud/rented/" + (act === "hw" ? "hardware" : act), body);
+      if(r.error) toast("❌ " + esc(cloudErr(r.error)), "err");
+      drawRented();
+    });
+    el.appendChild(d);
+  }
+  if(state.tab === "cloud" && cloud.tab === "rent") rentTimer = setTimeout(drawRented, 15000);
+}
+
+function pickHardware(cur){
+  return new Promise(resolve => {
+    const m = $("#modal"), c = $("#modalCard");
+    c.innerHTML = `<h3>Grafikkarte ändern</h3><p class="hint" style="margin:0 0 8px">Der Space startet danach mit der neuen Grafikkarte neu (dauert ein paar Minuten).</p>
+      <select class="sel" id="phSel">${(cloud.hw || []).map(h => `<option value="${esc(h.name)}">${esc(h.pretty)} · ${esc(h.vram || "")} · ${usd(h.per_hour)}/Std.</option>`).join("")}</select>
+      <div class="actions" style="margin-top:12px"><button class="btn pri" type="button" id="phOk">Übernehmen</button><button class="btn" type="button" id="phNo">Abbrechen</button></div>`;
+    if(cur) $("#phSel").value = cur;
+    m.classList.remove("hidden");
+    const done = v => { m.classList.add("hidden"); resolve(v); };
+    $("#phOk").onclick = () => done($("#phSel").value);
+    $("#phNo").onclick = () => done(null);
+  });
+}
+
+/* ---------- Studio im Cloud-Modus ---------- */
+function curCloud(){ return cloud.sel[state.kind]; }
+const cloudKey = s => s ? (s.mode === "provider" ? "cloud:" + s.task + ":" + s.id : "cloud:" + s.id) : "";
+function selLabel(s){ return (s.mode === "provider" ? "💳 " + s.title + " · " + TASKN[s.task] : s.rented ? "🖥️ " + s.title + " (gemietet)" : "🆓 " + s.title); }
+async function renderCloudStudio(){
+  const k = state.kind, s = curCloud();
+  const sel = $("#cSel"); sel.innerHTML = "";
+  const opts = cloud.recent.filter(x => (x.mode === "provider" ? TASKK[x.task] : x.kind) === k);
+  if(s && !opts.find(x => cloudKey(x) === cloudKey(s))) opts.unshift(s);
+  for(const x of opts){ const o = document.createElement("option"); o.value = cloudKey(x); o.textContent = selLabel(x); sel.appendChild(o); }
+  if(!opts.length){ const o = document.createElement("option"); o.textContent = "– noch nichts gewählt –"; sel.appendChild(o); }
+  if(s) sel.value = cloudKey(s);
+  sel.onchange = () => { const x = opts.find(o => cloudKey(o) === sel.value); if(x){ cloud.sel[k] = x; store.set("cloudSel", cloud.sel); renderCloudStudio(); } };
+  $("#cMore").onclick = () => { cloud.tab = s && s.mode === "provider" ? "pay" : "free"; if(s && s.mode === "provider") cloud.task = k === "video" ? "t2v" : "t2i"; else cloud.fKind = k; showTab("cloud"); };
+  $("#cEmpty").classList.toggle("hidden", !!s); $("#cForm").classList.toggle("hidden", !s);
+  if(!s){
+    $("#cInfo").innerHTML = "";
+    $("#cEmpty").innerHTML = `<h3 style="margin:6px 0 8px">☁️ Wähle, wie in der Cloud gerechnet werden soll</h3>
+      <div class="slots">
+        <button class="btn" type="button" style="text-align:left" onclick="cloud.tab='free';cloud.fKind='${k}';showTab('cloud')"><b>🆓 Gratis</b> – Spaces auf geteilten GPUs, Tageskontingent</button>
+        <button class="btn" type="button" style="text-align:left" onclick="cloud.tab='pay';cloud.task='${k === "video" ? "t2v" : "t2i"}';showTab('cloud')"><b>💳 Pro ${k === "video" ? "Video" : "Bild"} bezahlen</b> – schnell, ohne Limits, über dein HF-Guthaben</button>
+        <button class="btn" type="button" style="text-align:left" onclick="cloud.tab='rent';showTab('cloud')"><b>🖥️ GPU mieten</b> – eigene Grafikkarte pro Stunde</button>
+      </div>`;
+    updateGo(); return;
+  }
+  const badge = s.mode === "provider" ? `<span class="bdg pay">💳 ca. ${usd(unitPrice({ price: s.price || { unit: "s", usd: 0.08 }, learned: (cloud.acct && cloud.acct.costs || {})[s.id] }, s.task).usd)} ${TASKK[s.task] === "video" ? "pro 5-s-Video" : "pro Bild"}</span>`
+    : s.rented ? `<span class="bdg rent">🖥️ Gemietet${s.per_hour != null ? " · " + usd(s.per_hour) + "/Std." : ""}</span>` : `<span class="bdg free">🆓 Gratis · ZeroGPU-Kontingent</span>`;
+  $("#cInfo").innerHTML = `${badge} ${extLink(s.mode === "provider" ? "https://huggingface.co/" + s.id : /^https?:/.test(s.id) ? s.id : "https://huggingface.co/spaces/" + s.id, "Seite ↗")}`;
+  if(s.mode === "provider") renderProviderForm(s);
+  else await renderSpaceForm(s);
+  renderCloudEta();
+  updateGo();
+}
+function mediaSlot(id, title, media){
+  const wrap = document.createElement("div");
+  const cur = state.images[id];
+  const isV = media === "video", isA = media === "audio";
+  const prev = cur && cur.audio ? `<audio src="${cur.url}" controls style="width:100%"></audio><span class="hint">${esc(cur.file.name)} – klicken zum Ändern</span>` : cur ? (cur.video ? `<video src="${cur.url}" muted style="max-width:100%;max-height:190px;border-radius:8px;display:block;margin:0 auto 6px"></video>` : `<img src="${cur.url}" alt="">`) + `<span class="hint">${cur.w}×${cur.h} – klicken zum Ändern</span>` : (isA ? "Audiodatei" : isV ? "Video" : "Bild") + " hierher ziehen oder <b>klicken</b>";
+  wrap.innerHTML = `<label class="l" style="margin-top:0">${esc(title)}</label><div class="drop">${prev}</div><input type="file" accept="${isA ? "audio/*" : isV ? "video/*" : "image/*"}" class="hidden">${cur ? `<button class="btn" type="button" style="margin-top:4px;font-size:12px;padding:3px 10px">Entfernen</button>` : ""}`;
+  const drop = wrap.querySelector(".drop"), inp = wrap.querySelector("input"), rm = wrap.querySelector("button");
+  drop.onclick = () => inp.click();
+  drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); if(e.dataTransfer.files[0]) setImage(id, e.dataTransfer.files[0]); };
+  inp.onchange = () => { if(inp.files[0]) setImage(id, inp.files[0]); };
+  if(rm) rm.onclick = () => { delete state.images[id]; renderStudio(); };
+  return wrap;
+}
+const cPrompts = store.get("cPrompts", {});
+function setPromptBox(s, label, show){
+  ["#cPromptLbl", "#cPrompt", "#cAi"].forEach(x => $(x).classList.toggle("hidden", !show));
+  if(!show) $("#cAiBox").classList.add("hidden");
+  const helperOn = state.cfg.provider === "claude" ? !!state.cfg.claude_key_set : !!state.cfg.ollama_model;
+  if(!helperOn) $("#cAi").classList.add("hidden");
+  $("#cPromptLbl").textContent = label;
+  $("#cPrompt").placeholder = state.kind === "video" ? "z. B. Eine Katze läuft durch einen verschneiten Wald, sanftes Morgenlicht, Kamera folgt langsam" : "z. B. Ein gemütliches Café in Paris bei Regen, warmes Licht, fotorealistisch";
+  const key = cloudKey(s);
+  $("#cPrompt").value = cPrompts[key] ?? prompts[state.kind] ?? "";
+  $("#cPrompt").oninput = e => { cPrompts[key] = e.target.value; prompts[state.kind] = e.target.value; store.set("cPrompts", cPrompts); store.set("prompts", prompts); };
+}
+function renderProviderForm(s){
+  const k = state.kind, needImg = s.task === "i2v" || s.task === "i2i";
+  $("#cEpBox").classList.add("hidden");
+  const slots = $("#cSlots"); slots.innerHTML = "";
+  if(needImg) slots.appendChild(mediaSlot("c:img", s.task === "i2v" ? "Startbild" : "Bild zum Bearbeiten", "image"));
+  setPromptBox(s, s.task === "i2v" ? "Was soll im Video passieren?" : s.task === "i2i" ? "Was soll am Bild geändert werden?" : k === "video" ? "Beschreibe dein Video" : "Beschreibe dein Bild", true);
+  // Format
+  const showFmt = s.task === "t2v" || s.task === "t2i";
+  $("#cFmtBox").classList.toggle("hidden", !showFmt);
+  if(showFmt){
+    const A = s.task === "t2v" ? { "16:9": { n: "Quer 16:9" }, "9:16": { n: "Hoch 9:16" }, "1:1": { n: "Quadrat" } }
+      : { "1:1": { n: "Quadrat", sub: "1024×1024" }, "16:9": { n: "Quer 16:9", sub: "1344×768" }, "9:16": { n: "Hoch 9:16", sub: "768×1344" }, "4:3": { n: "4:3", sub: "1152×864" } };
+    if(!A[cloud.aspect[k]]) cloud.aspect[k] = Object.keys(A)[0];
+    chips($("#cAspect"), Object.entries(A), cloud.aspect[k], a => { cloud.aspect[k] = a; store.set("cAspect", cloud.aspect); renderCloudStudio(); });
+  }
+  $("#cDurBox").classList.add("hidden");
+  $("#cNegBox").classList.remove("hidden"); $("#cSeedBox").classList.remove("hidden");
+  $("#cExtra").innerHTML = s.providers && s.providers.length > 1 ? `<label class="l">Anbieter</label><select class="sel" id="cProv">${s.providers.map(p => `<option value="${esc(p)}" ${p === s.provider ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>` : `<p class="hint" style="margin:12px 0 0">Anbieter: ${esc(s.provider || "auto")}</p>`;
+  if($("#cProv")) $("#cProv").onchange = e => { s.provider = e.target.value; store.set("cloudSel", cloud.sel); };
+  $("#cGo").textContent = k === "video" ? "☁️ Video in der Cloud erstellen" : "☁️ Bild in der Cloud erstellen";
+  $("#cHint").textContent = "Die Kosten werden von deinem HuggingFace-Guthaben abgebucht.";
+}
+async function spaceInfo(id, force){
+  if(cloud.info[id] && !force) return cloud.info[id];
+  const r = await api("/easy/cloud/space_info", { space: id, force: !!force });
+  if(!r.error) cloud.info[id] = r;
+  return r;
+}
+function pickEndpoint(info, id){
+  const eps = (info.endpoints || []).filter(e => e.score > 0);
+  const list = eps.length ? eps : (info.endpoints || []).slice(0, 1);
+  const chosen = cloud.ep[id];
+  let ep = list.find(e => e.api === chosen);
+  if(!ep){
+    const hasImg = Object.keys(state.images).some(x => x.startsWith("c:" + id + ":"));
+    ep = (hasImg && list.find(e => e.fields.some(f => f.kind === "image"))) || list[0];
+  }
+  return { ep, list };
+}
+async function renderSpaceForm(s){
+  const k = state.kind;
+  $("#cFmtBox").classList.add("hidden");
+  $("#cGo").textContent = k === "video" ? "☁️ Video in der Cloud erstellen" : "☁️ Bild in der Cloud erstellen";
+  $("#cHint").textContent = s.rented ? "Läuft auf deiner gemieteten GPU – kostet pro Minute, solange der Space wach ist." : "Gratis über das ZeroGPU-Tageskontingent. Bei Andrang gibt es eine Warteschlange.";
+  if(!(await checkSetup())){
+    $("#cSlots").innerHTML = `<div class="msg warn">Für die Cloud braucht Easy Generate einmalig zwei kleine Bausteine. <button class="btn pri" type="button" onclick="showTab('cloud')">Zu ☁️ Cloud</button></div>`;
+    ["#cPromptLbl", "#cPrompt", "#cAi", "#cDurBox", "#cEpBox"].forEach(x => $(x).classList.add("hidden"));
+    return;
+  }
+  let info = cloud.info[s.id];
+  if(!info){
+    $("#cSlots").innerHTML = `<div class="hint">Lese die Einstellungen des Space … (beim ersten Mal einige Sekunden)</div>`;
+    ["#cPromptLbl", "#cPrompt", "#cAi", "#cDurBox", "#cEpBox"].forEach(x => $(x).classList.add("hidden"));
+    info = await spaceInfo(s.id);
+    if(curCloud() !== s || state.compute[k] !== "cloud") return;
+    if(info.error){
+      $("#cSlots").innerHTML = `<div class="msg err">${esc(cloudErr(info.error))}</div><div class="actions" style="margin-top:8px"><button class="btn" type="button" id="cRetry">Erneut versuchen</button></div>`;
+      $("#cRetry").onclick = async () => { delete cloud.info[s.id]; await spaceInfo(s.id, true); renderCloudStudio(); };
+      return;
+    }
+  }
+  const { ep, list } = pickEndpoint(info, s.id);
+  if(!ep){ $("#cSlots").innerHTML = `<div class="msg err">Dieser Space bietet keine nutzbare Funktion an.</div>`; return; }
+  $("#cEpBox").classList.toggle("hidden", list.length < 2);
+  $("#cEp").innerHTML = list.map(e => `<option value="${esc(e.api)}">${esc(e.api.replace(/^\//, "").replace(/_/g, " "))}</option>`).join("");
+  $("#cEp").value = ep.api;
+  $("#cEp").onchange = e => { cloud.ep[s.id] = e.target.value; store.set("cloudEp", cloud.ep); renderCloudStudio(); };
+  const vk = s.id + ep.api, vals = cloud.vals[vk] = cloud.vals[vk] || store.get("cv:" + vk, {});
+  const saveVals = () => store.set("cv:" + vk, vals);
+  // Medien
+  const slots = $("#cSlots"); slots.innerHTML = "";
+  for(const f of ep.fields.filter(f => ["image", "video", "audio"].includes(f.kind))) slots.appendChild(mediaSlot(`c:${s.id}:${f.i}`, f.label + (f.required ? "" : " (optional)"), f.kind));
+  // Prompt
+  const pf = ep.fields.find(f => f.role === "prompt") || ep.fields.find(f => f.kind === "text" && f.role !== "negative");
+  setPromptBox(s, pf ? pf.label : "Prompt", !!pf);
+  if(pf && !$("#cPrompt").value && typeof pf.default === "string") $("#cPrompt").placeholder = pf.default;
+  // Länge
+  const df = ep.fields.find(f => f.role === "duration");
+  $("#cDurBox").classList.toggle("hidden", !df);
+  if(df){
+    const min = df.min ?? 1, max = df.max ?? 10, d = cloud.dur[vk] ?? df.default ?? Math.min(max, 5);
+    Object.assign($("#cDur"), { min, max, step: max - min > 20 ? 1 : 0.5 }); $("#cDur").value = d; $("#cDurTxt").textContent = d + " s";
+    $("#cDur").oninput = e => { cloud.dur[vk] = +e.target.value; store.set("cDur", cloud.dur); $("#cDurTxt").textContent = e.target.value + " s"; };
+  }
+  const nf = ep.fields.find(f => f.role === "negative");
+  $("#cNegBox").classList.toggle("hidden", !nf);
+  if(nf){ $("#cNeg").placeholder = typeof nf.default === "string" && nf.default ? nf.default : "leer = Standard"; }
+  const sf = ep.fields.find(f => f.role === "seed");
+  $("#cSeedBox").classList.toggle("hidden", !sf);
+  // weitere Einstellungen
+  const used = new Set([pf, df, nf, sf].filter(Boolean).map(f => f.i));
+  const extra = ep.fields.filter(f => !used.has(f.i) && f.role !== "randomize" && !["image", "video", "audio", "file", "skip"].includes(f.kind));
+  const box = $("#cExtra"); box.innerHTML = "";
+  if(extra.length) box.insertAdjacentHTML("beforeend", `<p class="hint" style="margin:14px 0 0">Einstellungen des Space (leer = Standard des Space):</p>`);
+  for(const f of extra){
+    const cur = vals[f.i] ?? f.default;
+    const w = document.createElement("div");
+    let inp;
+    if(f.kind === "bool"){ w.innerHTML = `<label class="row" style="gap:8px;margin-top:10px"><input type="checkbox"> ${esc(f.label)}</label>`; inp = w.querySelector("input"); inp.checked = !!cur; inp.onchange = () => { vals[f.i] = inp.checked; saveVals(); }; }
+    else if(f.kind === "choice" && f.choices){ w.innerHTML = `<label class="l">${esc(f.label)}</label><select class="sel"></select>`; inp = w.querySelector("select"); inp.innerHTML = f.choices.map(c => `<option>${esc(c)}</option>`).join(""); if(cur != null) inp.value = String(cur); inp.onchange = () => { vals[f.i] = inp.value; saveVals(); }; }
+    else { w.innerHTML = `<label class="l">${esc(f.label)}${f.min != null ? ` <span class="hint">(${f.min}–${f.max})</span>` : ""}</label><input type="${f.kind === "number" ? "number" : "text"}">`; inp = w.querySelector("input"); if(f.min != null){ inp.min = f.min; inp.max = f.max; } if(f.kind === "number") inp.step = f.int ? 1 : "any"; inp.value = cur ?? ""; inp.oninput = () => { vals[f.i] = inp.value === "" ? null : (f.kind === "number" ? +inp.value : inp.value); saveVals(); }; }
+    box.appendChild(w);
+  }
+}
+function renderCloudEta(){
+  const h = etaHist[cloudKey(curCloud())];
+  const s = curCloud();
+  let t = h && h.length ? `⏱ Geschätzte Dauer: <b>ca. ${fmtDur([...h.slice(-6).map(x => x.secs)].sort((a, b) => a - b)[Math.floor(Math.min(6, h.length) / 2)])}</b>` : `⏱ <span>Dauer wird bei der ersten Erstellung gemessen.</span>`;
+  if(s && s.mode === "space" && !s.rented) t += ` (plus Warteschlange)`;
+  $("#cEta").innerHTML = `<span>${t}</span>`;
+}
+$("#cSeedRand").onchange = e => { $("#cSeed").disabled = e.target.checked; };
+$("#cAi").onclick = async () => {
+  const idea = $("#cPrompt").value.trim();
+  if(!idea){ showMsg("warn", "Tippe zuerst deine Idee ein – auf Deutsch und kurz ist okay."); return; }
+  $("#cAi").disabled = true; const old = $("#cAi").textContent; $("#cAi").textContent = "✨ Denke nach …";
+  try{
+    const s = curCloud(), im = Object.entries(state.images).find(([id, v]) => id.startsWith("c:") && !v.video && !v.audio);
+    let img = null;
+    if(im){ const el = new Image(); el.src = im[1].url; await el.decode(); const sc = Math.min(1, 1024 / Math.max(el.naturalWidth, el.naturalHeight)); const c = document.createElement("canvas"); c.width = Math.round(el.naturalWidth * sc); c.height = Math.round(el.naturalHeight * sc); c.getContext("2d").drawImage(el, 0, 0, c.width, c.height); img = c.toDataURL("image/jpeg", 0.85); }
+    const j = await api("/easy/assist", { prompt: idea, wish: "", kind: state.kind, seconds: cloud.dur[(s && s.id) || ""] || 5, model: s ? s.title : "", image: img, lang: (window.EG_I18N && EG_I18N.lang) || "de" });
+    $("#cAiBox").classList.remove("hidden");
+    if(j.error){ $("#cAiOut").value = ""; $("#cAiDe").innerHTML = `<div class="msg err">${esc(j.error)}</div>`; }
+    else { $("#cAiOut").value = j.prompt; $("#cAiDe").textContent = j.de || ""; }
+  } finally { $("#cAi").disabled = false; $("#cAi").textContent = old; }
+};
+$("#cAiUse").onclick = () => { const v = $("#cAiOut").value.trim(); if(v){ $("#cPrompt").value = v; $("#cPrompt").dispatchEvent(new Event("input")); } $("#cAiBox").classList.add("hidden"); };
+$("#cAiClose").onclick = () => $("#cAiBox").classList.add("hidden");
+
+async function cloudGenerate(){
+  const s = curCloud(), k = state.kind;
+  if(!s) return;
+  if(!(await checkSetup())){ showMsg("warn", cloudErr("SETUP")); return; }
+  const prompt = $("#cPrompt").value.trim();
+  let seed = null;
+  if($("#cSeedRand").checked){ seed = Math.floor(Math.random() * 2 ** 31); $("#cSeed").value = seed; }
+  else seed = Math.max(0, parseInt($("#cSeed").value || "0", 10));
+  let body;
+  try{
+    if(s.mode === "provider"){
+      if(!prompt && !(s.task === "i2v")){ showMsg("warn", "Bitte beschreibe zuerst, was entstehen soll."); return; }
+      if(!(cloud.acct && cloud.acct.token_set) && !state.cfg.hf_token_set){ showMsg("err", cloudErr("AUTH")); return; }
+      body = { mode: "provider", task: s.task, model: s.id, provider: s.provider, prompt, negative: $("#cNeg").value.trim(), seed, extra: {}, units: TASKK[s.task] === "video" ? 5 : 1 };
+      if(s.task === "i2v" || s.task === "i2i"){
+        const im = state.images["c:img"]; if(!im){ showMsg("warn", "Bitte zuerst ein Bild auswählen."); return; }
+        body.image = await uploadImage(im);
+      }
+      const a = cloud.aspect[k];
+      if(s.task === "t2v" && s.provider === "fal-ai") body.extra.aspect_ratio = a;
+      if(s.task === "t2i"){ const S = { "1:1": [1024, 1024], "16:9": [1344, 768], "9:16": [768, 1344], "4:3": [1152, 864] }[a] || [1024, 1024]; body.extra.width = S[0]; body.extra.height = S[1]; }
+    } else {
+      if(s.rented){ state.cfg = await api("/easy/config"); if(!state.cfg.hf_space_token_set){ showMsg("warn", "Gemietete Spaces sind privat. Damit Easy Generate sie benutzen darf, braucht es den Space-Schlüssel mit Leserecht.\n→ ☁️ Cloud → „Gratis-Kontingent deines Kontos nutzen“ → Schlüssel anlegen (mit dem Haken „Read access to contents of all repos under your personal namespace“)."); return; } }
+      const info = cloud.info[s.id]; if(!info){ showMsg("warn", "Die Einstellungen des Space werden noch gelesen …"); return; }
+      const { ep } = pickEndpoint(info, s.id);
+      const vk = s.id + ep.api, vals = Object.assign({}, cloud.vals[vk] || {}), files = {};
+      const pf = ep.fields.find(f => f.role === "prompt") || ep.fields.find(f => f.kind === "text" && f.role !== "negative");
+      if(pf){ if(!prompt && pf.required){ showMsg("warn", "Bitte beschreibe zuerst, was entstehen soll."); return; } if(prompt) vals[pf.i] = prompt; }
+      const nf = ep.fields.find(f => f.role === "negative"); if(nf && $("#cNeg").value.trim()) vals[nf.i] = $("#cNeg").value.trim();
+      const df = ep.fields.find(f => f.role === "duration"); if(df && cloud.dur[vk] != null) vals[df.i] = cloud.dur[vk];
+      const sf = ep.fields.find(f => f.role === "seed"); if(sf) vals[sf.i] = seed;
+      const rf = ep.fields.find(f => f.role === "randomize"); if(rf && sf) vals[rf.i] = false;
+      // Auswahlfeld „Modus“ passend zur gewählten Funktion setzen (z. B. text-to-video)
+      const apiN = ep.api.replace(/^\//, "").replace(/_/g, "-").toLowerCase();
+      for(const f of ep.fields) if(f.kind === "choice" && f.choices && (cloud.vals[vk] || {})[f.i] == null){ const c = f.choices.find(x => x.toLowerCase() === apiN); if(c) vals[f.i] = c; }
+      for(const f of ep.fields.filter(f => ["image", "video", "audio"].includes(f.kind))){
+        const im = state.images[`c:${s.id}:${f.i}`];
+        if(im) files[f.i] = await uploadImage(im);
+        else if(f.required && f.default == null && ep.fields.filter(x => x.kind === f.kind).length === 1 && !pf){ showMsg("warn", `Bitte zuerst „${f.label}“ auswählen.`); return; }
+      }
+      body = { mode: "space", space: s.id, api: ep.api, values: vals, files };
+    }
+  }catch(e){ showMsg("err", String(e.message || e)); return; }
+  $("#out").innerHTML = ""; $("#resActions").classList.add("hidden");
+  const r = await api("/easy/cloud/run", body);
+  if(r.error){ showMsg("err", cloudErr(r.error)); return; }
+  const h = etaHist[cloudKey(s)];
+  cloud.run = { id: r.id, sel: s, start: Date.now(), est: h && h.length ? h.slice(-6).map(x => x.secs).sort((a, b) => a - b)[Math.floor(Math.min(6, h.length) / 2)] : null, units: body.units || 0 };
+  $("#progBox").classList.remove("hidden"); $("#progTxt").textContent = "Verbinde mit HuggingFace …"; $("#bar").style.width = "2%";
+  updateGo(); cloudPoll();
+}
+async function cloudPoll(){
+  const run = cloud.run; if(!run) return;
+  const el = (Date.now() - run.start) / 1000;
+  $("#timeTxt").textContent = fmtTime(el);
+  let j;
+  try{ j = await api("/easy/cloud/job/" + run.id); }catch(e){ j = {}; }
+  if(cloud.run !== run) return;
+  const st = j.status || {};
+  let pct = null, txt = "Läuft …", left = run.est ? run.est - el : null;
+  if(st.stage === "connect" || st.stage === "start" || st.stage === "submit") txt = "Verbinde mit HuggingFace …";
+  else if(st.stage === "queue"){
+    txt = st.rank != null ? `In der Warteschlange: Platz ${st.rank + 1}${st.size ? " von " + st.size : ""}` : "In der Warteschlange …";
+    if(st.eta) left = st.eta + (run.est || 0);
+  } else if(st.progress && st.progress.length){
+    pct = st.progress.index / st.progress.length * 100;
+    txt = `${st.progress.desc ? st.progress.desc + ": " : "Schritt "}${st.progress.index} von ${st.progress.length}`;
+  } else if(st.progress && st.progress.progress != null){ pct = st.progress.progress * 100; }
+  else if(st.code === "RETRY") txt = "Anbieter kennt nicht alle Einstellungen – versuche es mit Standardwerten …";
+  else if(run.sel.mode === "provider") txt = "Der Anbieter erstellt dein Ergebnis …";
+  if(pct == null && run.est) pct = Math.min(95, el / run.est * 100);
+  $("#progTxt").textContent = txt;
+  $("#bar").style.width = Math.max(2, Math.min(99, pct || 3)) + "%";
+  $("#etaRun").textContent = left != null ? (left > 5 ? `· noch ca. ${fmtDur(left)}` : "· gleich fertig …") : "";
+  if(j.state === "done"){
+    recordRun(cloudKey(run.sel), 1, el);
+    cloud.run = null; $("#progBox").classList.add("hidden"); updateGo();
+    if(state.tab === "video" || state.tab === "image") renderCloudEta();
+    if(!j.files || !j.files.length){ showMsg("warn", "Fertig, aber keine Ausgabe gefunden."); return; }
+    showResult(j.files);
+    let msg = `Fertig in ${fmtTime(el)} Min.`;
+    if(run.sel.mode === "provider"){ const p = unitPrice({ price: run.sel.price || { unit: "s", usd: 0.08 }, learned: null }, run.sel.task); msg += ` · Kosten ca. ${usd(p.usd)} (wird von deinem HuggingFace-Guthaben abgebucht)`; cloud.acct = null; }
+    showMsg("ok", msg);
+    return;
+  }
+  if(j.state === "error" || j.error){
+    cloud.run = null; $("#progBox").classList.add("hidden"); updateGo();
+    showMsg(j.error === "Abgebrochen." ? "warn" : "err", cloudErr(j.error));
+    return;
+  }
+  run.timer = setTimeout(cloudPoll, 1000);
+}
+async function cloudCancel(){
+  const run = cloud.run; if(!run) return;
+  clearTimeout(run.timer); cloud.run = null;
+  try{ await api("/easy/cloud/job/" + run.id + "/cancel", {}); }catch(e){}
+  $("#progBox").classList.add("hidden"); updateGo();
+  showMsg("warn", "Abgebrochen." + (run.sel.mode === "provider" ? " (Falls der Anbieter schon angefangen hat, kann trotzdem eine Gebühr anfallen.)" : ""));
+}
+$("#cGo").onclick = cloudGenerate;
+
 /* ================= Galerie ================= */
 let galKind = "all";
 async function loadGallery(){
@@ -800,9 +1571,16 @@ async function loadGallery(){
   const g = $("#gal"); g.innerHTML = `<div class="hint">Lade …</div>`;
   try{
     const j = await (await fetch("/history?max_items=80", { cache: "no-store" })).json();
+    const all = [];
+    for(const h of Object.values(j).reverse()){
+      const msgs = (h.status && h.status.messages) || [];
+      const ts = Math.max(0, ...msgs.map(m => (m[1] && m[1].timestamp) || 0)) / 1000;
+      for(const f of mediaFiles(h.outputs)) if((f.type || "output") === "output") all.push(Object.assign({ t: ts }, f));
+    }
+    try{ const c = await api("/easy/cloud/gallery"); for(const f of c.items || []) all.push(Object.assign({ t: f.mtime, cloud: true }, f)); }catch(e){}
+    all.sort((a, b) => (b.t || 0) - (a.t || 0));
     const items = [];
-    for(const h of Object.values(j).reverse()) for(const f of mediaFiles(h.outputs)){
-      if((f.type || "output") !== "output") continue;
+    for(const f of all){
       const v = isVideo(f) || /\.gif$/i.test(f.filename);
       if(galKind === "all" || (galKind === "video") === v) items.push(f);
     }
@@ -812,7 +1590,7 @@ async function loadGallery(){
       const it = document.createElement("div"); it.className = "it";
       it.appendChild(mediaEl(f, true));
       const meta = document.createElement("div"); meta.className = "meta";
-      meta.innerHTML = `<span>${esc(f.filename)}</span><a href="${viewUrl(f)}" download="${esc(f.filename)}">Laden</a>`;
+      meta.innerHTML = `<span>${f.cloud ? "☁️ " : ""}${esc(f.filename)}</span><a href="${viewUrl(f)}" download="${esc(f.filename)}">Laden</a>`;
       it.appendChild(meta); g.appendChild(it);
     }
   }catch(e){ g.innerHTML = `<div class="msg err">Galerie konnte nicht geladen werden.</div>`; }
@@ -1314,7 +2092,7 @@ function showUpdate(v){
   await loadInstalled();
   if(host){ try{ const i = await host.getInfo(); $("#verTxt").textContent = "Version " + i.version; }catch(e){} }
   let t = store.get("tab", "video");
-  if(!["video", "image", "gal", "models", "set"].includes(t)) t = "video";
+  if(!["video", "image", "cloud", "gal", "models", "set"].includes(t)) t = "video";
   showTab(t);
   watchDownload();
   loadCatalog(true);
