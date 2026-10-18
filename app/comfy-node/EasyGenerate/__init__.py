@@ -15,7 +15,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -49,6 +49,11 @@ def write_json(path, data):
 @routes.get("/easy")
 async def easy_page(request):
     return web.FileResponse(UI_FILE, headers={"Cache-Control": "no-store"})
+
+
+@routes.get("/easy/i18n.js")
+async def easy_i18n(request):
+    return web.FileResponse(os.path.join(HERE, "ui", "i18n.js"), headers={"Cache-Control": "no-store", "Content-Type": "application/javascript"})
 
 
 @routes.get("/easy/version")
@@ -560,7 +565,7 @@ async def easy_models_status(request):
     return web.json_response({
         "running": DL["running"], "speed": DL["speed"], "current": DL["current"], "errors": DL["errors"],
         "got": sum(x["got"] for x in active), "total": sum(x["size"] for x in active),
-        "items": [{k: x.get(k) for k in ("name", "got", "size", "status", "template", "error")} for x in q],
+        "items": [{k: x.get(k) for k in ("name", "got", "size", "status", "template", "error", "url")} for x in q],
     })
 
 
@@ -583,7 +588,7 @@ General rules:
 - English, one flowing paragraph, concrete and visual, about 60-170 words. No lists, no markdown.
 - Keep every element the user asked for. Do not add unrelated people, logos or text overlays.
 {rules}
-Reply ONLY with JSON: {{"prompt": "<the English prompt>", "de": "<one or two German sentences explaining what you changed>"}}"""
+Reply ONLY with JSON: {{"prompt": "<the English prompt>", "de": "<one or two {explain_lang} sentences explaining what you changed>"}}"""
 
 RULES = {
     "video": ("- Present tense. Start with the main action, then describe movements in order, subjects, setting.\n"
@@ -635,7 +640,8 @@ async def easy_assist(request):
         return web.json_response({"error": "Bitte zuerst eine Idee eintippen."}, status=400)
     cfg = load_cfg()
     rules = RULES[kind] + ("\n" + RULES["with_image"] if image_b64 else "")
-    system = SYSTEM_PROMPT.format(target=f"{model_title} ({kind})", rules=rules)
+    explain_lang = "English" if data.get("lang") == "en" else "German"
+    system = SYSTEM_PROMPT.format(target=f"{model_title} ({kind})", rules=rules, explain_lang=explain_lang)
     user = (f"Video length: {seconds} seconds.\n" if kind == "video" else "") + f"User idea (may be German): {idea or '(none)'}"
     if wish:
         user += f"\nChange request from the user (apply it): {wish}"
@@ -665,7 +671,7 @@ async def easy_assist(request):
             msg = {"role": "user", "content": user}
             if image_b64 and "," in image_b64 and any(x in model.lower() for x in ("vl", "llava", "vision", "gemma3", "gemma4", "minicpm")):
                 msg["images"] = [image_b64.split(",", 1)[1]]
-            body = {"model": model, "stream": False, "format": "json", "keep_alive": 0,
+            body = {"model": model, "stream": False, "format": "json", "keep_alive": 0, "think": False,
                     "options": {"temperature": 0.7}, "messages": [{"role": "system", "content": system}, msg]}
             async with aiohttp.ClientSession(timeout=timeout) as s:
                 async with s.post(cfg["ollama_url"].rstrip("/") + "/api/chat", json=body) as r:
@@ -678,6 +684,122 @@ async def easy_assist(request):
         return web.json_response({"error": "Keine Verbindung. Laeuft Ollama bzw. bist du online?"}, status=502)
     except Exception as e:
         return web.json_response({"error": "Fehler: " + str(e)}, status=500)
+
+
+# ---------------------------------------------------------------- System-Anzeige (CPU / RAM / GPU)
+import subprocess
+import threading
+
+GPU_STAT = {"util": None, "proc": None, "started": False}
+
+# Liest unter Windows die GPU-Auslastung aus den Leistungsindikatoren (wie im Task-Manager):
+# pro Grafikkarte die am staerksten ausgelastete Engine-Art (3D, Compute, ...), davon das Maximum.
+PS_GPU = r"""
+$ErrorActionPreference='SilentlyContinue'
+while($true){
+  $s=(Get-Counter -Counter '\GPU Engine(*)\Utilization Percentage' -SampleInterval 2).CounterSamples
+  $g=@{}
+  foreach($c in $s){ if($c.InstanceName -match 'luid_(0x[0-9a-f]+_0x[0-9a-f]+).*engtype_(\w+)'){ $k=$matches[1]+'|'+$matches[2]; $g[$k]=[double]$g[$k]+$c.CookedValue } }
+  $m=0; foreach($v in $g.Values){ if($v -gt $m){$m=$v} }
+  [Console]::Out.WriteLine([math]::Round([math]::Min(100,$m),1)); [Console]::Out.Flush()
+}
+"""
+
+
+def _gpu_reader():
+    try:
+        flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+        if os.name == "nt":
+            p = subprocess.Popen(["powershell", "-NoProfile", "-NonInteractive", "-Command", PS_GPU],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, creationflags=flags)
+        else:
+            p = subprocess.Popen(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits", "-l", "2"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        GPU_STAT["proc"] = p
+        for line in p.stdout:
+            try:
+                GPU_STAT["util"] = float(line.strip().split(",")[0])
+            except ValueError:
+                pass
+    except Exception:
+        GPU_STAT["util"] = None
+
+
+def ensure_gpu_reader():
+    if not GPU_STAT["started"]:
+        GPU_STAT["started"] = True
+        threading.Thread(target=_gpu_reader, daemon=True).start()
+
+
+@routes.get("/easy/sysinfo")
+async def easy_sysinfo(request):
+    ensure_gpu_reader()
+    out = {"cpu": None, "ram_used": None, "ram_total": None, "gpu": GPU_STAT["util"], "vram_used": None, "vram_total": None, "gpu_name": ""}
+    try:
+        import psutil
+        out["cpu"] = psutil.cpu_percent(interval=None)
+        vm = psutil.virtual_memory()
+        out["ram_used"], out["ram_total"] = vm.total - vm.available, vm.total
+    except Exception:
+        pass
+    try:
+        import comfy.model_management as mm
+        dev = mm.get_torch_device()
+        total = mm.get_total_memory(dev)
+        free = mm.get_free_memory(dev)
+        if dev.type != "cpu":
+            out["vram_total"], out["vram_used"] = total, max(0, total - free)
+            out["gpu_name"] = mm.get_torch_device_name(dev)
+    except Exception:
+        pass
+    return web.json_response(out)
+
+
+# ---------------------------------------------------------------- Ollama: Modelle laden
+OLLAMA_PULL = {"running": False, "model": "", "status": "", "completed": 0, "total": 0, "error": None, "done": False}
+
+
+async def _ollama_pull(model):
+    OLLAMA_PULL.update({"running": True, "model": model, "status": "Starte …", "completed": 0, "total": 0, "error": None, "done": False})
+    cfg = load_cfg()
+    try:
+        timeout = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=600)
+        async with aiohttp.ClientSession(timeout=timeout) as s:
+            async with s.post(cfg["ollama_url"].rstrip("/") + "/api/pull", json={"model": model, "stream": True}) as r:
+                async for line in r.content:
+                    try:
+                        j = json.loads(line)
+                    except Exception:
+                        continue
+                    if j.get("error"):
+                        raise RuntimeError(j["error"])
+                    OLLAMA_PULL["status"] = j.get("status", "")
+                    if j.get("total"):
+                        OLLAMA_PULL["total"], OLLAMA_PULL["completed"] = j["total"], j.get("completed", 0)
+        cfg = load_cfg()
+        cfg["provider"], cfg["ollama_model"] = "ollama", model
+        write_json(CFG_FILE, cfg)
+        OLLAMA_PULL["done"] = True
+    except Exception as e:
+        OLLAMA_PULL["error"] = "Ollama nicht erreichbar" if isinstance(e, aiohttp.ClientConnectorError) else str(e)
+    finally:
+        OLLAMA_PULL["running"] = False
+
+
+@routes.post("/easy/ollama/pull")
+async def easy_ollama_pull(request):
+    data = await request.json()
+    model = str(data.get("model", "")).strip()
+    if not model:
+        return web.json_response({"error": "Kein Modell angegeben"}, status=400)
+    if not OLLAMA_PULL["running"]:
+        asyncio.create_task(_ollama_pull(model))
+    return web.json_response({"ok": True})
+
+
+@routes.get("/easy/ollama/pull_status")
+async def easy_ollama_pull_status(request):
+    return web.json_response(OLLAMA_PULL)
 
 
 print(f"[Easy Generate] Erweiterung {VERSION} bereit unter /easy")

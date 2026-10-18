@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
 <title>Easy Generate</title>
+<script src="comfy-node/EasyGenerate/ui/i18n.js"></script>
 <style>
 :root{--bg:#0e1014;--panel:#171a21;--panel2:#1e222b;--line:#2a2f3a;--text:#e8eaf0;--muted:#9aa1b2;--accent:#ff6a3d;--accent2:#ff8a5c;--ok:#3ecf8e;--err:#ff5c6c}
 *{box-sizing:border-box}
@@ -64,7 +65,7 @@ label.l{display:block;color:var(--muted);font-size:13px;margin:14px 0 6px}
 
   <!-- Assistent: Schritt 1 -->
   <div id="vWiz" class="hidden">
-    <h2>Willkommen!</h2>
+    <div class="row" style="justify-content:space-between"><h2>Willkommen!</h2><div class="chips"><button class="chip" id="lDe">Deutsch</button><button class="chip" id="lEn">English</button></div></div>
     <p class="sub">Easy Generate braucht <b>ComfyUI</b> – das ist die KI-Maschine, die im Hintergrund die Bilder und Videos berechnet.</p>
     <div id="wScan" class="card"><div class="hint">Suche nach vorhandenen ComfyUI-Installationen …</div><div class="bar ind"><div></div></div></div>
     <div id="wOpts"></div>
@@ -147,8 +148,8 @@ $("#wNext").onclick = async () => {
 $("#wPick").onclick = async () => {
   const r = await S.chooseExisting();
   if(!r) return;
-  if(r.error){ alert(r.error); return; }
-  if(!r.usable){ alert("Zu diesem ComfyUI wurde kein Python gefunden. Wähle besser „ComfyUI neu installieren“."); return; }
+  if(r.error){ alert(EG_I18N.tr(r.error)); return; }
+  if(!r.usable){ alert(EG_I18N.tr("Zu diesem ComfyUI wurde kein Python gefunden. Wähle besser „ComfyUI neu installieren“.")); return; }
   det.found.unshift(Object.assign({ label: "ComfyUI" }, r)); choice = r.comfyDir; renderOpts();
 };
 
@@ -183,6 +184,8 @@ $("#nGo").onclick = async () => {
   if(r && r.error){ show("vErr"); $("#eMsg").textContent = r.error; }
 };
 
+$("#lDe").classList.toggle("act", EG_I18N.lang === "de"); $("#lEn").classList.toggle("act", EG_I18N.lang === "en");
+$("#lDe").onclick = () => EG_I18N.setLang("de"); $("#lEn").onclick = () => EG_I18N.setLang("en");
 (async () => { const st = await S.state(); if(!st.hasComfy) wizard(); })();
 </script>
 </body>

@@ -14,6 +14,12 @@ contextBridge.exposeInMainWorld("easyApp", {
   restartComfy: () => ipcRenderer.invoke("app:restartComfy"),
   updateComfy: () => ipcRenderer.invoke("app:updateComfy"),
   changeComfy: () => ipcRenderer.invoke("app:changeComfy"),
+  ollamaInfo: () => ipcRenderer.invoke("app:ollamaInfo"),
+  installOllama: () => ipcRenderer.invoke("app:installOllama"),
+  startOllama: () => ipcRenderer.invoke("app:startOllama"),
+  onOllamaProgress: cb => on("ollama:progress", cb),
+  setLang: l => ipcRenderer.invoke("app:setLang", l),
+  getLang: () => ipcRenderer.invoke("app:getLang"),
   setup: {
     state: () => ipcRenderer.invoke("setup:state"),
     detect: () => ipcRenderer.invoke("setup:detect"),

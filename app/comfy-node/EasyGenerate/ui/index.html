@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Easy Generate</title>
+<script src="/easy/i18n.js"></script>
 <style>
 :root{
   --bg:#0e1014; --side:#12151b; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
@@ -94,6 +95,20 @@ details{margin-top:14px} summary{cursor:pointer;color:var(--muted);font-size:13p
 .modal .card{max-width:520px;width:calc(100% - 32px)}
 code{background:var(--panel2);padding:1px 6px;border-radius:5px}
 .log div{margin:3px 0;font-size:14px}
+.mon{width:236px;flex:none;background:var(--side);border-left:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:12px;overflow:auto}
+.mon.closed{width:44px;padding:18px 6px}.mon.closed .mc2,.mon.closed .monT{display:none}
+.mon .hd{display:flex;align-items:center;justify-content:space-between}
+.monT{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.mc2{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+.mc2 .k{display:flex;justify-content:space-between;align-items:baseline}
+.mc2 .k b{font-size:13px;color:var(--muted);font-weight:600}
+.mc2 .k span{font-size:20px;font-weight:700}
+.mc2 .s{font-size:12px;color:var(--muted);margin-top:2px}
+.mc2 svg{width:100%;height:38px;display:block;margin-top:6px}
+.mc2 .mini{height:6px;background:var(--panel2);border-radius:9px;overflow:hidden;margin-top:6px}.mc2 .mini>div{height:100%;background:var(--accent2)}
+.tog{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;width:28px;height:28px;cursor:pointer}
+.eta{display:flex;gap:6px;align-items:center;margin-top:10px;color:var(--muted);font-size:13px}
+@media (max-width:1180px){.mon{display:none}}
 </style>
 </head>
 <body>
@@ -161,13 +176,14 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
           </details>
 
           <button class="big" id="go">Erstellen</button>
+          <div class="eta" id="etaPre"></div>
           <p class="hint" id="goHint" style="margin:8px 0 0"></p>
         </div>
 
         <div class="card stage">
           <div class="viewer" id="viewer"><div class="empty">Hier erscheint dein Ergebnis.<br><span class="hint">Tipp: Erst klein testen, dann groß erstellen.</span></div></div>
           <div id="progBox" class="hidden">
-            <div class="row" style="justify-content:space-between;margin-bottom:6px"><span id="progTxt">Starte …</span><span class="hint" id="timeTxt">0:00</span></div>
+            <div class="row" style="justify-content:space-between;margin-bottom:6px"><span id="progTxt">Starte …</span><span class="hint"><span id="timeTxt">0:00</span> <span id="etaRun"></span></span></div>
             <div class="bar"><div id="bar"></div></div>
             <div class="actions" style="margin-top:10px"><button class="btn danger" id="stop">Abbrechen</button></div>
           </div>
@@ -208,6 +224,11 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
   <section id="settings" class="hidden">
     <h1>Einstellungen</h1><p class="sub">&nbsp;</p>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr))">
+      <div class="card">
+        <h3>Sprache / Language</h3>
+        <div class="chips" id="langChips"></div>
+        <p class="hint" style="margin:8px 0 0">Die Oberfläche wird nach dem Umschalten neu geladen.</p>
+      </div>
       <div class="card" id="appCard">
         <h3>Programm</h3>
         <div id="appInfo" class="hint"></div>
@@ -235,9 +256,21 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
         <h3>✨ KI-Prompt-Helfer</h3>
         <div class="chips" id="provChips" style="margin-bottom:10px"></div>
         <div id="provOllama">
-          <p class="hint" style="margin:0 0 8px">Läuft komplett auf deinem PC, kostenlos. Einmalig ein Modell laden, z. B. <code>ollama pull qwen3:8b</code> oder <code>gemma3:12b</code> (kann auch Bilder ansehen).</p>
-          <div class="row"><select class="sel" id="olModel"></select><button class="btn" type="button" id="olReload">Aktualisieren</button></div>
-          <p class="hint" id="olMsg" style="margin:6px 0 0"></p>
+          <p class="hint" style="margin:0 0 8px">Läuft komplett auf deinem PC, kostenlos und privat. Das Sprachmodell gibt den Grafikspeicher nach jeder Antwort sofort wieder frei.</p>
+          <div id="olState" class="msg warn" style="margin-bottom:10px">Prüfe Ollama …</div>
+          <div id="olInstallBox" class="hidden">
+            <div class="actions"><button class="btn pri" type="button" id="olInstall">Ollama installieren</button><button class="btn" type="button" id="olStart">Ollama starten</button></div>
+            <div class="bar hidden" id="olInstBar" style="margin-top:10px"><div></div></div>
+          </div>
+          <div id="olModelsBox" class="hidden">
+            <label class="l" style="margin-top:0">Empfohlene Modelle – per Klick laden</label>
+            <div id="olRec" class="slots"></div>
+            <div class="bar hidden" id="olPullBar" style="margin-top:10px"><div></div></div>
+            <div class="hint" id="olPullTxt" style="margin-top:6px"></div>
+            <label class="l">Verwendetes Modell</label>
+            <div class="row"><select class="sel" id="olModel"></select><button class="btn" type="button" id="olReload">Aktualisieren</button></div>
+            <p class="hint" id="olMsg" style="margin:6px 0 0"></p>
+          </div>
         </div>
         <div id="provClaude" class="hidden">
           <p class="hint" style="margin:0 0 8px">Beste Qualität, sieht auch dein Startbild an. API-Key von <a href="https://platform.claude.com" target="_blank">platform.claude.com</a> (getrennt vom Claude-Abo, Abrechnung nach Verbrauch; mit Haiku 5.5 Bruchteile eines Cents pro Verbesserung).</p>
@@ -267,6 +300,13 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
 
   </div>
   </main>
+  <aside class="mon" id="mon">
+    <div class="hd"><span class="monT">System</span><button class="tog" id="monTog" type="button" title="Ein-/Ausklappen">⟩</button></div>
+    <div class="mc2"><div class="k"><b>CPU</b><span id="mCpu">–</span></div><svg id="sCpu" viewBox="0 0 100 38" preserveAspectRatio="none"></svg></div>
+    <div class="mc2"><div class="k"><b>RAM</b><span id="mRam">–</span></div><div class="s" id="mRamS">&nbsp;</div><svg id="sRam" viewBox="0 0 100 38" preserveAspectRatio="none"></svg></div>
+    <div class="mc2"><div class="k"><b>GPU</b><span id="mGpu">–</span></div><div class="s" id="mGpuN">&nbsp;</div><svg id="sGpu" viewBox="0 0 100 38" preserveAspectRatio="none"></svg>
+      <div class="s" style="margin-top:8px">VRAM <span id="mVram">–</span></div><div class="mini"><div id="mVramB" style="width:0"></div></div></div>
+  </aside>
 </div>
 <div id="modal" class="modal hidden"><div class="card" id="modalCard"></div></div>
 
@@ -536,6 +576,7 @@ function renderStudio(){
   $("#turboRow").classList.toggle("hidden", !info.turbo);
   if(info.turbo) $("#turboLbl").textContent = "Schnell-Modus (" + info.turbo.title + ")";
   $("#go").textContent = k === "video" ? "Video erstellen" : (state.batch > 1 ? `${state.batch} Bilder erstellen` : "Bild erstellen");
+  renderEta();
   updateGo();
 }
 function updateGo(){
@@ -626,7 +667,7 @@ async function generate(){
       for(const ne of Object.values(j.node_errors || {})) for(const e of ne.errors || []) lines.push(`${ne.class_type}: ${e.message}${e.details ? " – " + e.details : ""}`);
       showMsg("err", friendly(lines.join("\n"))); return;
     }
-    state.run = { id: j.prompt_id, key, kind: k, start: Date.now(), total: Object.keys(wf).length, done: new Set(), step: 0, max: 0, finished: false, wf };
+    state.run = { id: j.prompt_id, key, kind: k, start: Date.now(), total: Object.keys(wf).length, done: new Set(), step: 0, max: 0, finished: false, wf, units: workUnits(), est: estimate() };
     $("#progBox").classList.remove("hidden"); $("#progTxt").textContent = "In der Warteschlange …"; $("#bar").style.width = "2%";
     tick(); updateGo();
   }catch(e){ showMsg("err", friendly(String(e.message || e))); }
@@ -634,6 +675,7 @@ async function generate(){
 function tick(){
   const run = state.run; if(!run) return;
   $("#timeTxt").textContent = fmtTime((Date.now() - run.start) / 1000);
+  $("#etaRun").textContent = runEtaText(run);
   run.timer = setTimeout(tick, 1000);
   if(!ws || ws.readyState !== 1){ if(!run.poll || Date.now() - run.poll > 3000){ run.poll = Date.now(); pollDone(); } }
 }
@@ -654,7 +696,7 @@ function onWS(m){
     const n = run.wf[run.cur];
     $("#progTxt").textContent = "Arbeite: " + (n ? (n._meta && n._meta.title) || n.class_type : run.cur);
   }
-  if(m.type === "progress"){ run.step = d.value; run.max = d.max; $("#progTxt").textContent = `Schritt ${d.value} von ${d.max}`; }
+  if(m.type === "progress"){ if(d.value <= 1 || d.max !== run.max) run.samplerStart = Date.now(); run.step = d.value; run.max = d.max; $("#progTxt").textContent = `Schritt ${d.value} von ${d.max}`; }
   if(m.type === "execution_success") finish();
   if(m.type === "execution_error"){ fail(friendly(`${d.node_type || ""}: ${d.exception_message || "Fehler"}`)); return; }
   if(m.type === "execution_interrupted"){ fail("Abgebrochen."); return; }
@@ -680,7 +722,9 @@ async function finish(){
     if(!files.length) await new Promise(r => setTimeout(r, 800));
   }
   const secs = (Date.now() - run.start) / 1000;
+  recordRun(run.key, run.units, secs);
   endRun();
+  if(state.tab === "video" || state.tab === "image") renderEta();
   if(!files.length){ showMsg("warn", "Fertig, aber keine Ausgabe gefunden. Schau in den Ausgabe-Ordner."); return; }
   showResult(files);
   showMsg("ok", `Fertig in ${fmtTime(secs)} Min.`);
@@ -733,7 +777,7 @@ async function askAI(wish){
   try{
     const base = wish && $("#aiOut").value.trim() ? $("#aiOut").value.trim() : $("#prompt").value.trim();
     const tool = state.installed.find(t => t.name === state.active[state.kind]);
-    const j = await api("/easy/assist", { prompt: base, wish: wish || "", kind: state.kind, seconds: state.seconds, model: tool ? tool.title : "", image: await imageDataUrl() });
+    const j = await api("/easy/assist", { prompt: base, wish: wish || "", kind: state.kind, seconds: state.seconds, model: tool ? tool.title : "", image: await imageDataUrl(), lang: (window.EG_I18N && EG_I18N.lang) || "de" });
     $("#aiBox").classList.remove("hidden");
     if(j.error){ $("#aiOut").value = ""; $("#aiDe").innerHTML = `<div class="msg err">${esc(j.error)}\n→ Einstellungen: KI-Prompt-Helfer prüfen.</div>`; }
     else { $("#aiOut").value = j.prompt; $("#aiDe").textContent = j.de || ""; }
@@ -927,8 +971,31 @@ async function watchDownload(){
     $("#dlEta").textContent = s.speed ? `${(s.speed / 1048576).toFixed(1)} MB/s` + (left ? ` · noch ca. ${left > 3600 ? (left / 3600).toFixed(1) + " Std." : Math.ceil(left / 60) + " Min."}` : "") : "";
     $("#dlFile").textContent = s.current;
     $("#dlStop").classList.remove("hidden");
-  } else $("#dlStop").classList.add("hidden");
-  $("#dlErr").innerHTML = (s.errors || []).length ? `<div class="msg err" style="margin-top:8px">${s.errors.map(esc).join("\n")}\n<button class="btn" type="button" id="dlRetry" style="margin-top:6px">Erneut versuchen</button></div>` : "";
+  } else { $("#dlStop").classList.add("hidden"); $("#dlTxt").textContent = "Download angehalten"; $("#dlEta").textContent = ""; $("#dlFile").textContent = ""; }
+  if(document.activeElement && document.activeElement.id === "dlTok"){ if(state.tab === "models") renderCatalog(); return; }
+  const gated = (s.items || []).filter(x => x.status === "error" && /verweigert|HuggingFace/i.test(x.error || ""));
+  const repos = [...new Set(gated.map(x => { const m = String(x.url || "").match(/huggingface\.co\/([^/]+\/[^/]+)\//); return m ? m[1] : null; }).filter(Boolean))];
+  const other = (s.errors || []).filter(e => !/verweigert|HuggingFace/i.test(e));
+  let eh = "";
+  if(gated.length){
+    eh += `<div class="msg warn" style="margin-top:8px;white-space:normal">
+      <b>🔑 Diese Modelle sind bei HuggingFace zugangsbeschränkt.</b> Einmalig freischalten (kostenlos, ca. 2 Minuten):
+      <ol style="margin:8px 0 8px 18px;padding:0">
+        <li>Kostenloses Konto anlegen bzw. anmelden: <a href="https://huggingface.co/join" target="_blank">huggingface.co/join</a></li>
+        <li>Auf dieser Seite auf <b>„Agree and Access“</b> klicken: ${repos.map(r => `<a href="https://huggingface.co/${esc(r)}" target="_blank">${esc(r)}</a>`).join(", ")}</li>
+        <li>Einen Zugangsschlüssel erstellen (Typ <b>„Read“</b>): <a href="https://huggingface.co/settings/tokens/new?tokenType=read" target="_blank">huggingface.co/settings/tokens</a></li>
+        <li>Den Schlüssel hier einfügen:</li>
+      </ol>
+      <div class="row"><input type="password" id="dlTok" placeholder="hf_…" autocomplete="off"><button class="btn pri" type="button" id="dlTokGo">Speichern &amp; erneut laden</button></div></div>`;
+  }
+  if(other.length) eh += `<div class="msg err" style="margin-top:8px">${other.map(esc).join("\n")}</div>`;
+  if(gated.length || other.length) eh += `<button class="btn" type="button" id="dlRetry" style="margin-top:8px">Erneut versuchen</button>`;
+  $("#dlErr").innerHTML = eh;
+  if($("#dlTokGo")) $("#dlTokGo").onclick = async () => {
+    const t = $("#dlTok").value.trim(); if(!t) return;
+    await api("/easy/config", { hf_token: t });
+    $("#dlRetry").click();
+  };
   if($("#dlRetry")) $("#dlRetry").onclick = async () => {
     const retry = (s.items || []).filter(x => x.status === "error" || x.status === "paused");
     const byT = {}; for(const x of retry) (byT[x.template] = byT[x.template] || []).push(x.template);
@@ -947,8 +1014,163 @@ async function refreshAll(){
   if(state.tab === "video" || state.tab === "image") renderStudio();
 }
 
+
+/* ================= System-Anzeige ================= */
+const hist = { cpu: [], ram: [], gpu: [] };
+function spark(id, arr){
+  const n = 40, pts = arr.slice(-n);
+  const d = pts.map((v, i) => `${(i / (n - 1) * 100).toFixed(1)},${(38 - Math.max(0, Math.min(100, v)) / 100 * 34 - 2).toFixed(1)}`).join(" ");
+  $(id).innerHTML = pts.length > 1 ? `<polyline points="${d}" fill="none" stroke="var(--accent2)" stroke-width="1.6" vector-effect="non-scaling-stroke"/>` : "";
+}
+const pct = v => v == null ? "–" : Math.round(v) + "%";
+const gb = v => (v / 1073741824).toFixed(1);
+async function pollSys(){
+  try{
+    const s = await (await fetch("/easy/sysinfo", { cache: "no-store" })).json();
+    if(s.cpu != null){ hist.cpu.push(s.cpu); $("#mCpu").textContent = pct(s.cpu); spark("#sCpu", hist.cpu); }
+    if(s.ram_total){ const p = s.ram_used / s.ram_total * 100; hist.ram.push(p); $("#mRam").textContent = pct(p); $("#mRamS").textContent = `${gb(s.ram_used)} / ${gb(s.ram_total)} GB`; spark("#sRam", hist.ram); }
+    if(s.gpu != null){ hist.gpu.push(s.gpu); $("#mGpu").textContent = pct(s.gpu); spark("#sGpu", hist.gpu); }
+    $("#mGpuN").textContent = s.gpu_name ? String(s.gpu_name).replace(/^\w+:\d+\s*/, "").replace(/\s*:\s*\w+$/, "").slice(0, 32) : " ";
+    if(s.vram_total){ $("#mVram").textContent = `${gb(s.vram_used)} / ${gb(s.vram_total)} GB`; $("#mVramB").style.width = (s.vram_used / s.vram_total * 100).toFixed(0) + "%"; }
+    for(const k in hist) if(hist[k].length > 120) hist[k].splice(0, 60);
+  }catch(e){}
+}
+$("#monTog").onclick = () => { const c = $("#mon").classList.toggle("closed"); $("#monTog").textContent = c ? "⟨" : "⟩"; store.set("monClosed", c); };
+if(store.get("monClosed", false)){ $("#mon").classList.add("closed"); $("#monTog").textContent = "⟨"; }
+setInterval(pollSys, 2000); pollSys();
+
+/* ================= Restzeit-Schätzung ================= */
+// Merkt sich pro Modell, wie lange Erstellungen gedauert haben, und rechnet auf die aktuelle Größe/Länge hoch.
+function workUnits(){
+  const i = curInfo(); if(!i) return 1;
+  const d = dimsFor(SIZES[state.size].f);
+  const px = d ? d.w * d.h : 1048576 * (i.baseMP || 1);
+  const len = state.kind === "video" && hasLen(i) ? frames() : 1;
+  const n = state.kind === "image" && i.batch.length ? state.batch : 1;
+  return px * len * n / 1e6;
+}
+const etaHist = store.get("etaHist", {});
+function estimate(){
+  const h = etaHist[state.active[state.kind]];
+  if(!h || !h.length) return null;
+  const rates = h.slice(-6).map(x => x.secs / Math.max(0.01, x.units)).sort((a, b) => a - b);
+  const med = rates[Math.floor(rates.length / 2)];
+  // feste Startzeit (Modell laden) grob abziehen/addieren: kleinster gemessener Wert als Untergrenze
+  return Math.max(Math.min(...h.slice(-6).map(x => x.secs)) * 0.3, med * workUnits());
+}
+function recordRun(key, units, secs){
+  const h = etaHist[key] = etaHist[key] || [];
+  h.push({ units, secs: Math.round(secs) }); if(h.length > 12) h.splice(0, h.length - 12);
+  store.set("etaHist", etaHist);
+}
+const fmtDur = s => s >= 3600 ? (s / 3600).toFixed(1).replace(".", ",") + " Std." : s >= 90 ? Math.round(s / 60) + " Min." : Math.max(1, Math.round(s)) + " Sek.";
+function renderEta(){
+  const e = estimate();
+  $("#etaPre").innerHTML = e ? `⏱ Geschätzte Dauer: <b>ca. ${fmtDur(e)}</b>` : `⏱ <span>Dauer wird bei der ersten Erstellung gemessen – danach siehst du hier eine Schätzung.</span>`;
+}
+function runEtaText(run){
+  const el = (Date.now() - run.start) / 1000;
+  let left = null;
+  if(run.est) left = run.est - el;
+  if(run.max && run.step >= 2 && run.samplerStart){         // Live-Hochrechnung im Sampler
+    const per = (Date.now() - run.samplerStart) / 1000 / run.step;
+    const live = per * (run.max - run.step);
+    left = left == null ? live : Math.max(live, Math.min(left, live * 3));
+  }
+  if(left == null) return "";
+  return left > 5 ? `· noch ca. ${fmtDur(left)}` : "· gleich fertig …";
+}
+
+/* ================= Ollama einrichten ================= */
+const OL_REC = [
+  { id: "gemma3:4b", n: "Gemma 3 · 4B", d: "3,3 GB · schnell, kann auch Bilder ansehen (empfohlen)" },
+  { id: "qwen3:8b", n: "Qwen 3 · 8B", d: "5,2 GB · sehr gute Texte, keine Bilder" },
+  { id: "gemma3:12b", n: "Gemma 3 · 12B", d: "8,1 GB · beste Qualität, kann Bilder ansehen" },
+];
+let olModels = [];
+async function refreshOllama(){
+  const j = await api("/easy/ollama_models");
+  const running = !j.error;
+  olModels = j.models || [];
+  let inst = null;
+  if(host && host.ollamaInfo){ try{ inst = await host.ollamaInfo(); }catch(e){} }
+  $("#olInstallBox").classList.toggle("hidden", running);
+  $("#olModelsBox").classList.toggle("hidden", !running);
+  if(running){
+    $("#olState").className = "msg ok"; $("#olState").textContent = `Ollama läuft ✓ · ${olModels.length} Modell(e) installiert`;
+  } else if(inst && inst.installed){
+    $("#olState").className = "msg warn"; $("#olState").textContent = "Ollama ist installiert, läuft aber gerade nicht.";
+    $("#olInstall").classList.add("hidden"); $("#olStart").classList.remove("hidden");
+  } else {
+    $("#olState").className = "msg warn";
+    $("#olState").textContent = host ? "Ollama ist noch nicht installiert. Ein Klick genügt – ca. 1 GB Download." : "Ollama läuft nicht. Installiere es von ollama.com oder öffne Easy Generate als Programm.";
+    $("#olInstall").classList.toggle("hidden", !host); $("#olStart").classList.add("hidden");
+  }
+  // empfohlene Modelle
+  const rec = $("#olRec"); rec.innerHTML = "";
+  for(const m of OL_REC){
+    const have = olModels.some(x => x === m.id || x.startsWith(m.id + "-") || x === m.id + ":latest");
+    const d = document.createElement("div"); d.className = "row";
+    d.innerHTML = `<div style="flex:1"><b>${esc(m.n)}</b><div class="hint">${esc(m.d)}</div></div>`;
+    const b = document.createElement("button"); b.type = "button";
+    b.className = "btn " + (have ? "" : "pri"); b.textContent = have ? "Benutzen" : "Laden";
+    b.onclick = () => have ? useOllamaModel(m.id) : pullOllama(m.id);
+    d.appendChild(b); rec.appendChild(d);
+  }
+  const sel = $("#olModel"); sel.innerHTML = "";
+  for(const m of olModels){ const o = document.createElement("option"); o.value = o.textContent = m; sel.appendChild(o); }
+  if(state.cfg.ollama_model && olModels.includes(state.cfg.ollama_model)) sel.value = state.cfg.ollama_model;
+  $("#olMsg").textContent = olModels.length ? "" : "Noch kein Modell – lade oben eins mit einem Klick.";
+}
+async function useOllamaModel(id){
+  const name = olModels.find(x => x === id || x.startsWith(id)) || id;
+  state.cfg = await api("/easy/config", { provider: "ollama", ollama_model: name });
+  toast(`✅ ${esc(name)} wird jetzt für den Prompt-Helfer verwendet.`, "ok");
+  renderSettings();
+}
+let olPullTimer = null;
+async function pullOllama(id){
+  const r = await api("/easy/ollama/pull", { model: id });
+  if(r.error){ toast("❌ " + esc(r.error), "err"); return; }
+  $("#olPullBar").classList.remove("hidden");
+  const tick = async () => {
+    const s = await api("/easy/ollama/pull_status");
+    const p = s.total ? s.completed / s.total * 100 : 0;
+    $("#olPullBar").firstElementChild.style.width = Math.max(2, p) + "%";
+    $("#olPullTxt").textContent = `${s.model}: ${s.status || ""}${s.total ? ` · ${gb(s.completed)} / ${gb(s.total)} GB` : ""}`;
+    if(s.running){ olPullTimer = setTimeout(tick, 1000); return; }
+    $("#olPullBar").classList.add("hidden");
+    if(s.error){ $("#olPullTxt").textContent = "❌ " + s.error; return; }
+    $("#olPullTxt").textContent = `✅ ${s.model} geladen und als Prompt-Helfer eingestellt.`;
+    state.cfg = await api("/easy/config"); refreshOllama();
+  };
+  tick();
+}
+$("#olInstall").onclick = async () => {
+  if(!host) return;
+  $("#olInstall").disabled = true; $("#olInstBar").classList.remove("hidden");
+  $("#olState").className = "msg warn"; $("#olState").textContent = "Lade Ollama herunter …";
+  const off = host.onOllamaProgress(p => {
+    $("#olInstBar").firstElementChild.style.width = Math.max(2, p.pct || 0) + "%";
+    $("#olState").textContent = p.text;
+  });
+  const r = await host.installOllama();
+  off && off();
+  $("#olInstall").disabled = false; $("#olInstBar").classList.add("hidden");
+  if(r && r.error){ $("#olState").className = "msg err"; $("#olState").textContent = r.error; return; }
+  refreshOllama();
+};
+$("#olStart").onclick = async () => {
+  if(!host) return;
+  $("#olState").textContent = "Starte Ollama …";
+  const r = await host.startOllama();
+  if(r && r.error){ $("#olState").className = "msg err"; $("#olState").textContent = r.error; return; }
+  refreshOllama();
+};
+
 /* ================= Einstellungen ================= */
 async function renderSettings(){
+  chips($("#langChips"), [["de", { n: "🇩🇪 Deutsch" }], ["en", { n: "🇬🇧 English" }]], (window.EG_I18N && EG_I18N.lang) || "de", l => { if(window.EG_I18N && l !== EG_I18N.lang) EG_I18N.setLang(l); });
   state.cfg = await api("/easy/config");
   // KI
   const PROV = [["ollama", { n: "Lokal (Ollama)", sub: "kostenlos, privat" }], ["claude", { n: "Claude", sub: "beste Qualität" }]];
@@ -959,7 +1181,7 @@ async function renderSettings(){
   $("#keyHint").textContent = state.cfg.claude_key_set ? "(gespeichert " + state.cfg.claude_key_hint + " – leer lassen zum Behalten)" : "";
   $("#clModel").value = state.cfg.claude_model || "claude-haiku-5-5";
   $("#hfHint").textContent = state.cfg.hf_token_set ? " gespeichert ✓" : "";
-  loadOllama();
+  refreshOllama();
   // Programm & ComfyUI (nur im Easy-Generate-Programm)
   if(host){
     const info = await host.getInfo();
@@ -974,15 +1196,8 @@ async function renderSettings(){
     ["#cUpd", "#cRestart", "#cOut", "#cModels", "#cChange"].forEach(s => $(s).classList.add("hidden"));
   }
 }
-async function loadOllama(){
-  const sel = $("#olModel"); $("#olMsg").textContent = "Suche Modelle …";
-  const j = await api("/easy/ollama_models");
-  sel.innerHTML = "";
-  for(const m of j.models || []){ const o = document.createElement("option"); o.value = o.textContent = m; sel.appendChild(o); }
-  if(state.cfg.ollama_model && (j.models || []).includes(state.cfg.ollama_model)) sel.value = state.cfg.ollama_model;
-  $("#olMsg").textContent = j.error ? "Ollama läuft nicht – bitte Ollama starten." : (j.models || []).length ? `${j.models.length} Modell(e) gefunden.` : "Noch kein Modell installiert (siehe Befehl oben).";
-}
-$("#olReload").onclick = loadOllama;
+$("#olReload").onclick = refreshOllama;
+$("#olModel").onchange = e => useOllamaModel(e.target.value);
 $("#aiSave").onclick = async () => {
   state.cfg = await api("/easy/config", { provider: state.cfg.provider, ollama_model: $("#olModel").value || "", claude_model: $("#clModel").value, claude_key: $("#clKey").value });
   $("#clKey").value = ""; $("#aiSetMsg").innerHTML = `<div class="msg ok">Gespeichert.</div>`; renderSettings();

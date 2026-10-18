@@ -338,10 +338,12 @@ function createWindow() {
     let close = cfg.closeMode === "always";
     const running = cfg.comfy && await comfyAt(cfg.comfy.port);
     if (running && cfg.closeMode === "ask") {
+      const en = cfg.lang === "en";
       const r = await dialog.showMessageBox(win, {
-        type: "question", title: "Easy Generate", buttons: ["Ja, schließen", "Nein, weiterlaufen lassen"], defaultId: 0, cancelId: 1,
-        message: "Soll ComfyUI auch geschlossen werden?", detail: "Das gibt den Grafikspeicher wieder frei. Lässt du es laufen, startet Easy Generate beim nächsten Mal schneller.",
-        checkboxLabel: "Nicht mehr fragen – ComfyUI immer automatisch schließen", checkboxChecked: false,
+        type: "question", title: "Easy Generate", buttons: en ? ["Yes, close it", "No, keep it running"] : ["Ja, schließen", "Nein, weiterlaufen lassen"], defaultId: 0, cancelId: 1,
+        message: en ? "Close ComfyUI as well?" : "Soll ComfyUI auch geschlossen werden?",
+        detail: en ? "This frees your graphics memory. If you keep it running, Easy Generate starts faster next time." : "Das gibt den Grafikspeicher wieder frei. Lässt du es laufen, startet Easy Generate beim nächsten Mal schneller.",
+        checkboxLabel: en ? "Don't ask again – always close ComfyUI automatically" : "Nicht mehr fragen – ComfyUI immer automatisch schließen", checkboxChecked: false,
       });
       close = r.response === 0;
       if (close && r.checkboxChecked) { cfg.closeMode = "always"; saveCfg(); }
@@ -406,6 +408,42 @@ ipcMain.handle("setup:install", async (e, opts) => {
 });
 ipcMain.handle("setup:retry", async () => { await launch(); return true; });
 ipcMain.handle("setup:log", () => tailLog(6000));
+
+// ------------------------------------------------------------------ Ollama (Prompt-Helfer)
+function ollamaExe() {
+  const la = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+  return [path.join(la, "Programs", "Ollama", "ollama.exe"), "C:\\Program Files\\Ollama\\ollama.exe"].find(exists) || null;
+}
+const ollamaUp = () => getJSON("http://127.0.0.1:11434/api/tags", 2000);
+async function startOllama() {
+  if (await ollamaUp()) return { ok: true };
+  const exe = ollamaExe();
+  if (!exe) return { error: "Ollama ist nicht installiert." };
+  const p = spawn(exe, ["serve"], { detached: true, windowsHide: true, stdio: "ignore" });
+  p.unref();
+  for (let i = 0; i < 40; i++) { if (await ollamaUp()) return { ok: true }; await sleep(500); }
+  return { error: "Ollama startet nicht. Bitte den PC neu starten und erneut versuchen." };
+}
+async function installOllama() {
+  if (!IS_WIN) return { error: "Die automatische Installation gibt es nur unter Windows." };
+  const prog = (text, pct) => send("ollama:progress", { text, pct });
+  const setup = path.join(app.getPath("temp"), "OllamaSetup.exe");
+  try {
+    await download("https://ollama.com/download/OllamaSetup.exe", setup, (got, total, speed) =>
+      prog(`Lade Ollama herunter … ${(got / 1048576).toFixed(0)} / ${(total / 1048576).toFixed(0)} MB · ${(speed / 1048576).toFixed(1)} MB/s`, total ? got / total * 100 : 0));
+    prog("Installiere Ollama … (dauert etwa eine Minute)", 100);
+    const r = await run(setup, ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-"]);
+    if (r.err && !ollamaExe()) return { error: "Installation fehlgeschlagen: " + (r.err.message || r.err) };
+    try { fs.unlinkSync(setup); } catch (e) {}
+    prog("Starte Ollama …", 100);
+    return await startOllama();
+  } catch (e) { return { error: "Ollama konnte nicht installiert werden: " + (e.message || e) }; }
+}
+ipcMain.handle("app:ollamaInfo", async () => ({ installed: !!ollamaExe(), running: !!(await ollamaUp()) }));
+ipcMain.handle("app:installOllama", () => installOllama());
+ipcMain.handle("app:startOllama", () => startOllama());
+ipcMain.handle("app:setLang", (e, l) => { if (["de", "en"].includes(l)) { cfg.lang = l; saveCfg(); } return true; });
+ipcMain.handle("app:getLang", () => cfg.lang || "de");
 
 // ------------------------------------------------------------------ Start
 if (!app.requestSingleInstanceLock()) app.quit();
