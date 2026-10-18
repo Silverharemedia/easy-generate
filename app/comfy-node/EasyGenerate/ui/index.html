@@ -1228,6 +1228,7 @@ async function renderRent(){
       <select class="sel" id="rHw"></select>
       <label class="l">Schaltet sich automatisch aus nach</label>
       <select class="sel" id="rSleep"><option value="900">15 Min. ohne Nutzung (empfohlen)</option><option value="1800">30 Min.</option><option value="3600">1 Std.</option><option value="7200">2 Std.</option></select>
+      <label class="row hint" style="gap:8px;margin-top:10px;color:var(--text)"><input type="checkbox" id="rPwr"> <span>☕ Nach dem ersten Laden automatisch pausieren (dann keine Kosten, bis du startest)</span></label>
       <div class="hint" id="rCost" style="margin-top:10px"></div>
       <button class="big" id="rGo" type="button">GPU mieten</button>
       <div id="rMsg" style="margin-top:8px"></div>
@@ -1253,7 +1254,7 @@ async function renderRent(){
     const h = hws.find(x => x.name === hwSel.value);
     if(!confirm(T(`„${sp}“ auf ${h ? h.pretty : hwSel.value} mieten?`) + "\n\n" + T(`Kosten: ${h ? usd(h.per_hour) : "?"} pro Stunde, solange der Space läuft. Ohne Nutzung schaltet er sich automatisch aus.`))) return;
     $("#rGo").disabled = true; $("#rMsg").innerHTML = `<span class="hint">Richte ein …</span>`;
-    const r = await api("/easy/cloud/rent", { space: sp, hardware: hwSel.value, sleep: +$("#rSleep").value });
+    const r = await api("/easy/cloud/rent", { space: sp, hardware: hwSel.value, sleep: +$("#rSleep").value, pause_when_ready: $("#rPwr").checked });
     $("#rGo").disabled = false;
     if(r.error){ $("#rMsg").innerHTML = `<div class="msg err">${esc(cloudErr(r.error))}</div>`; return; }
     $("#rMsg").innerHTML = `<div class="msg ok">✅ ${esc(r.id)} wird gestartet. Das dauert beim ersten Mal ein paar Minuten – du kannst ihn schon im Studio auswählen.</div>`;
@@ -1285,10 +1286,14 @@ async function drawRented(){
     d.innerHTML = `<div class="tt">🖥️ ${esc(x.id.split("/").pop())}</div><div class="id">${esc(x.id)} · Vorlage: ${esc(x.from || "")}</div>
       <div class="bd2"><span class="bdg ${cls}">${esc(txt)}</span><span class="bdg rent">${esc(x.pretty || "")}${x.per_hour != null ? " · " + usd(x.per_hour) + "/Std." : ""}</span>${x.sleep ? `<span class="bdg">geht nach ${Math.round(x.sleep / 60)} Min. ohne Nutzung aus</span>` : ""}</div>
       ${x.billing ? `<div class="hint">💸 Kostet gerade ${usd(x.per_hour)} pro Stunde.</div>` : ""}
+      ${x.billing && x.stage !== "RUNNING" ? `<label class="row hint" style="gap:8px;color:var(--text)"><input type="checkbox" data-pwr ${x.pause_when_ready ? "checked" : ""}> <span>☕ Sobald fertig geladen automatisch pausieren</span></label>` : ""}
+      ${!x.billing && x.auto_paused_at && Date.now() / 1000 - x.auto_paused_at < 12 * 3600 ? `<div class="hint">✅ Fertig geladen und automatisch pausiert.</div>` : ""}
       <div class="ac"><button class="btn pri" type="button" data-a="use">Benutzen</button>
         ${x.billing ? `<button class="btn" type="button" data-a="pause">⏸ Pausieren</button>` : x.stage !== "GONE" ? `<button class="btn" type="button" data-a="start">▶ Starten</button>` : ""}
         <button class="btn" type="button" data-a="hw">GPU ändern</button>
         <button class="btn danger" type="button" data-a="delete">Löschen</button></div>`;
+    const pw = d.querySelector("[data-pwr]");
+    if(pw) pw.onchange = () => api("/easy/cloud/rented/pause_when_ready", { space: x.id, value: pw.checked });
     d.querySelectorAll("[data-a]").forEach(b => b.onclick = async () => {
       const act = b.dataset.a;
       if(act === "use"){ const k = /image|flux|qwen-image|z-image|sdxl|klein/i.test(x.from || x.id) ? "image" : "video"; useCloud(k, { mode: "space", id: x.id, title: x.id.split("/").pop(), rented: true, per_hour: x.per_hour }); return; }
@@ -1492,20 +1497,32 @@ async function renderSpaceForm(s){
   }
 }
 // Gemietete GPU: erst warten, bis der Space fertig gebaut und gestartet ist (beim ersten Mal oft 5–20 Min.).
+function notifyReady(s){
+  const msg = T("Deine GPU ist bereit – du kannst jetzt erstellen.");
+  toast("✅ " + esc(msg), "ok", 8000);
+  try{ if(window.Notification && (document.hidden || !document.hasFocus())) new Notification("Easy Generate", { body: msg }); }catch(e){}
+}
 async function waitRented(s){
   const t0 = Date.now();
+  let waited = false;
   const show = (html, kind) => { $("#cSlots").innerHTML = `<div class="msg ${kind || "warn"}">${html}</div>`; ["#cPromptLbl", "#cPrompt", "#cAi", "#cDurBox", "#cEpBox"].forEach(x => $(x).classList.add("hidden")); };
   const START = { BUILDING: "Die GPU wird eingerichtet (Programm wird gebaut) …", RUNNING_BUILDING: "Die GPU wird neu eingerichtet …", APP_STARTING: "Die GPU startet und lädt das Modell …", RUNNING_APP_STARTING: "Die GPU startet und lädt das Modell …" };
   for(;;){
     if(curCloud() !== s || state.compute[state.kind] !== "cloud") return false;
     const r = await api("/easy/cloud/runtime?space=" + encodeURIComponent(s.id));
     if(r.error){ return true; }   // unbekannt -> normal weiter versuchen
-    if(r.stage === "RUNNING") return true;
+    if(r.stage === "RUNNING"){
+      if(waited) notifyReady(s);
+      return true;
+    }
+    waited = true;
     const min = Math.floor((Date.now() - t0) / 60000);
     if(START[r.stage]){
-      show(`⏳ <b>${esc(START[r.stage])}</b>\n<span>Beim ersten Start lädt der Server das Modell herunter – das dauert oft 5–20 Minuten. Easy Generate wartet automatisch und macht dann hier weiter.</span>\n<span class="hint">Status: ${esc(r.stage)} · ${min} Min.</span>`);
+      show(`⏳ <b>${esc(START[r.stage])}</b>\n<span>Beim ersten Start lädt der Server das Modell herunter – das dauert oft 5–20 Minuten. Easy Generate wartet automatisch und macht dann hier weiter.</span>\n<span class="hint">Status: ${esc(r.stage)} · ${min} Min.</span>\n<label class="row" style="gap:8px;margin-top:4px;color:var(--text)"><input type="checkbox" id="pwr" ${r.pause_when_ready ? "checked" : ""}> <span>☕ Sobald fertig geladen automatisch pausieren (dann keine Kosten, bis du wieder startest)</span></label>`);
+      $("#pwr").onchange = e => api("/easy/cloud/rented/pause_when_ready", { space: s.id, value: e.target.checked });
     } else if(["PAUSED", "SLEEPING", "STOPPED"].includes(r.stage)){
-      show(`⏸ <b>Deine GPU ist ausgeschaltet.</b> <button class="btn pri" type="button" id="wkGo">▶ Jetzt starten</button>\n<span class="hint">Danach dauert es ein paar Minuten, bis sie bereit ist.</span>`);
+      const auto = r.auto_paused_at && Date.now() / 1000 - r.auto_paused_at < 12 * 3600;
+      show(`${auto ? `✅ <b>Deine GPU ist fertig geladen und wurde automatisch pausiert.</b>\n<span>Sie kostet jetzt nichts. Beim nächsten Start lädt sie das Modell noch einmal – das geht aber schneller als beim ersten Mal.</span>` : `⏸ <b>Deine GPU ist ausgeschaltet.</b>`} <button class="btn pri" type="button" id="wkGo">▶ Jetzt starten</button>\n<span class="hint">Danach dauert es ein paar Minuten, bis sie bereit ist.</span>`);
       await new Promise(res => { $("#wkGo").onclick = async () => { $("#wkGo").disabled = true; await api("/easy/cloud/wake", { space: s.id }); res(); }; });
       continue;
     } else {

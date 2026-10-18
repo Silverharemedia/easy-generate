@@ -639,6 +639,11 @@ async def cloud_run(request):
         units = 0
         label = sid
         if mine(sid):
+            st = cstate()
+            x = _rented_entry(st, sid)
+            if x and x.get("pause_when_ready"):      # du erstellst gerade etwas -> nicht automatisch pausieren
+                x["pause_when_ready"] = False
+                save_cstate(st)
             await _wake(sid)
     else:
         return web.json_response({"error": "Unbekannter Modus"}, status=400)
@@ -717,6 +722,61 @@ def mine(sid):
     return any(x["id"] == sid for x in cstate().get("rented", []))
 
 
+# ---- „Sobald bereit pausieren“: wartet im Hintergrund, bis die GPU fertig geladen hat, und pausiert sie dann.
+WATCH = {}
+
+
+def _rented_entry(st, sid):
+    for x in st.get("rented", []):
+        if x["id"] == sid:
+            return x
+    return None
+
+
+async def _ready_watch(sid):
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 2 * 3600:
+            st = cstate()
+            x = _rented_entry(st, sid)
+            if not x or not x.get("pause_when_ready"):
+                return
+            try:
+                rt = await hf("GET", f"/api/spaces/{sid}/runtime")
+            except Exception:
+                await asyncio.sleep(30)
+                continue
+            stage = rt.get("stage")
+            if stage == "RUNNING":
+                await hf("POST", f"/api/spaces/{sid}/pause")
+                st = cstate()
+                x = _rented_entry(st, sid)
+                if x:
+                    x["pause_when_ready"] = False          # gilt nur fuer diesen einen Start
+                    x["auto_paused_at"] = time.time()
+                    save_cstate(st)
+                print(f"[Easy Generate] {sid} ist fertig geladen und wurde automatisch pausiert.")
+                return
+            if stage in ("PAUSED", "SLEEPING", "STOPPED", "BUILD_ERROR", "RUNTIME_ERROR", "CONFIG_ERROR", "DELETING"):
+                return
+            await asyncio.sleep(20)
+    except Exception as e:
+        print("[Easy Generate] Bereit-Waechter:", e)
+    finally:
+        WATCH.pop(sid, None)
+
+
+def ensure_watch(sid):
+    if sid not in WATCH:
+        WATCH[sid] = asyncio.ensure_future(_ready_watch(sid))
+
+
+def _resume_watches():
+    for x in cstate().get("rented", []):
+        if x.get("pause_when_ready"):
+            ensure_watch(x["id"])
+
+
 async def _wake(sid):
     try:
         rt = await hf("GET", f"/api/spaces/{sid}/runtime")
@@ -753,8 +813,11 @@ async def cloud_rent(request):
                 raise
         st = cstate()
         st["rented"] = [x for x in st.get("rented", []) if x["id"] != target]
-        st["rented"].append({"id": target, "from": src, "hardware": hw, "sleep": sleep, "created": time.time()})
+        st["rented"].append({"id": target, "from": src, "hardware": hw, "sleep": sleep, "created": time.time(),
+                             "pause_when_ready": bool(data.get("pause_when_ready"))})
         save_cstate(st)
+        if data.get("pause_when_ready"):
+            ensure_watch(target)
         return web.json_response({"id": target})
     except HFError as e:
         msg = e.text
@@ -807,8 +870,12 @@ async def cloud_runtime(request):
     try:
         rt = await hf("GET", f"/api/spaces/{sid}/runtime")
         hw = rt.get("hardware") or {}
+        x = _rented_entry(cstate(), sid) or {}
+        if x.get("pause_when_ready"):
+            ensure_watch(sid)
         return web.json_response({"stage": rt.get("stage"), "hardware": hw.get("current"), "requested": hw.get("requested"),
-                                  "message": (rt.get("errorMessage") or "")[:500]})
+                                  "message": (rt.get("errorMessage") or "")[:500], "pause_when_ready": bool(x.get("pause_when_ready")),
+                                  "auto_paused_at": x.get("auto_paused_at")})
     except HFError as e:
         return web.json_response({"error": str(e)}, status=400)
     except Exception as e:
@@ -827,6 +894,7 @@ async def cloud_wake(request):
 
 @routes.get("/easy/cloud/rented")
 async def cloud_rented(request):
+    _resume_watches()
     if not token():
         return web.json_response({"items": [], "pause_on_exit": cstate().get("pause_on_exit", True)})
     return web.json_response({"items": await _rented_status(), "pause_on_exit": cstate().get("pause_on_exit", True)})
@@ -838,6 +906,17 @@ async def cloud_rented_action(request):
         return web.json_response({"error": "bad request"}, status=400)
     action = request.match_info["action"]
     data = await request.json()
+    if action == "pause_when_ready":
+        sid = str(data.get("space") or "")
+        st = cstate()
+        x = _rented_entry(st, sid)
+        if not x:
+            return web.json_response({"error": "unbekannt"}, status=400)
+        x["pause_when_ready"] = bool(data.get("value"))
+        save_cstate(st)
+        if x["pause_when_ready"]:
+            ensure_watch(sid)
+        return web.json_response({"ok": True})
     if action == "pause_on_exit":
         st = cstate()
         st["pause_on_exit"] = bool(data.get("value"))
