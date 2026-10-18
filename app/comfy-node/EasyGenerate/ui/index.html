@@ -141,7 +141,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
     <div class="nav">
       <button data-tab="video" class="act"><span class="ico">🎬</span>Video</button>
       <button data-tab="image"><span class="ico">🖼️</span>Bild</button>
-      <button data-tab="cloud"><span class="ico">☁️</span>Cloud<span class="badge hidden" id="clBadge"></span></button>
+      <button data-tab="cloud"><span class="ico">☁️</span>Cloud</button>
       <button data-tab="gal"><span class="ico">📁</span>Galerie</button>
       <button data-tab="models"><span class="ico">📦</span>Modelle<span class="badge hidden" id="dlBadge"></span></button>
       <button data-tab="set"><span class="ico">⚙️</span>Einstellungen</button>
@@ -1277,7 +1277,7 @@ async function drawRented(){
   const el = $("#rList"); if(!el) return;
   if($("#rPauseExit")) $("#rPauseExit").checked = j.pause_on_exit !== false;
   const running = cloud.rented.filter(x => x.billing);
-  $("#clBadge").classList.toggle("hidden", !running.length); $("#clBadge").textContent = running.length ? "$" : "";
+
   if(!cloud.rented.length){ el.innerHTML = `<span class="hint">Noch keine. Links eine GPU mieten.</span>`; return; }
   el.innerHTML = "";
   for(const x of cloud.rented){
