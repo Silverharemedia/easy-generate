@@ -57,11 +57,37 @@ ComfyUI mit der Easy-Generate-Erweiterung. Wird von Easy Generate verwaltet.
 """
 
 
-def comfy_entry():
-    for x in cstate().get("rented", []):
-        if x.get("kind") == "comfy":
+def slot_of(x):
+    try:
+        return max(1, int(x.get("slot") or 1))
+    except Exception:
+        return 1
+
+
+def space_name(slot):
+    return SPACE_NAME if slot <= 1 else f"{SPACE_NAME}-{slot}"
+
+
+def comfy_entries():
+    """Alle eigenen Cloud-GPUs (GPU 1, GPU 2, ...), nach Nummer sortiert."""
+    return sorted([x for x in cstate().get("rented", []) if x.get("kind") == "comfy"], key=slot_of)
+
+
+def comfy_entry(slot=1):
+    for x in comfy_entries():
+        if slot_of(x) == int(slot or 1):
             return x
     return None
+
+
+def req_slot(request, data=None):
+    v = (data or {}).get("slot") if data else None
+    if v is None:
+        v = request.query.get("slot")
+    try:
+        return max(1, min(20, int(v or 1)))
+    except Exception:
+        return 1
 
 
 def node_files():
@@ -111,11 +137,14 @@ async def comfy_create(request):
     sleep = int(data.get("sleep") or 900)
     if not token():
         return web.json_response({"error": "AUTH"}, status=400)
+    used = {slot_of(x) for x in comfy_entries()}
+    slot = int(data.get("slot") or 0) or next(n for n in range(1, 50) if n not in used)
+    name = space_name(slot)
     try:
         me = await hf("GET", "/api/whoami-v2")
         user = me["name"]
-        sid = f"{user}/{SPACE_NAME}"
-        payload = {"name": SPACE_NAME, "type": "space", "sdk": "docker", "private": True,
+        sid = f"{user}/{name}"
+        payload = {"name": name, "type": "space", "sdk": "docker", "private": True,
                    "hardware": hw, "sleepTimeSeconds": sleep,
                    "secrets": [{"key": "HF_TOKEN", "value": token()}]}
         try:
@@ -136,12 +165,12 @@ async def comfy_create(request):
             raise
         st = cstate()
         st["rented"] = [x for x in st.get("rented", []) if x["id"] != sid]
-        st["rented"].append({"id": sid, "from": "ComfyUI (Easy Generate)", "kind": "comfy", "hardware": hw, "sleep": sleep,
+        st["rented"].append({"id": sid, "from": "ComfyUI (Easy Generate)" + (f" · GPU {slot}" if slot > 1 else ""), "kind": "comfy", "slot": slot, "hardware": hw, "sleep": sleep,
                              "created": time.time(), "version": VERSION, "api": REMOTE_API, "pause_when_ready": bool(data.get("pause_when_ready"))})
         save_cstate(st)
         if data.get("pause_when_ready"):
             ensure_watch(sid)
-        return web.json_response({"id": sid})
+        return web.json_response({"id": sid, "slot": slot})
     except HFError as e:
         msg = e.text
         try:
@@ -157,29 +186,31 @@ async def comfy_create(request):
 @routes.post("/easy/cloud/comfy/update")
 async def comfy_update(request):
     """Programm auf der Cloud-GPU auf den Stand dieser Easy-Generate-Version bringen."""
-    x = comfy_entry()
-    if not x:
+    data = await request.json() if request.can_read_body else {}
+    xs = comfy_entries() if (data or {}).get("all") else [comfy_entry(req_slot(request, data))]
+    xs = [x for x in xs if x]
+    if not xs:
         return web.json_response({"error": "Keine Cloud-GPU eingerichtet."}, status=400)
     try:
-        await commit_files(x["id"], program_files(), f"Easy Generate {VERSION}")
-        st = cstate()
-        e = _rented_entry(st, x["id"])
-        if e:
-            e["version"] = VERSION
-            e["api"] = REMOTE_API
-            save_cstate(st)
+        files = program_files()
+        for x in xs:
+            await commit_files(x["id"], files, f"Easy Generate {VERSION}")
+            st = cstate()
+            e = _rented_entry(st, x["id"])
+            if e:
+                e["version"] = VERSION
+                e["api"] = REMOTE_API
+                save_cstate(st)
         return web.json_response({"ok": True})
     except HFError as e:
         return web.json_response({"error": str(e)}, status=400)
 
 
-@routes.get("/easy/cloud/comfy/info")
-async def comfy_info(request):
-    x = comfy_entry()
-    if not x:
-        return web.json_response({"exists": False, "space_token": bool(space_token()), "version": VERSION})
-    out = {"exists": True, "id": x["id"], "hardware": x.get("hardware"), "remote_version": x.get("version"),
-           "version": VERSION, "space_token": bool(space_token()), "needs_update": int(x.get("api") or 1) < REMOTE_API}
+async def _info(x):
+    slot = slot_of(x)
+    out = {"exists": True, "id": x["id"], "slot": slot, "B": base_path(slot), "hardware": x.get("hardware"), "remote_version": x.get("version"),
+           "version": VERSION, "space_token": bool(space_token()), "needs_update": int(x.get("api") or 1) < REMOTE_API,
+           "sleep": x.get("sleep")}
     try:
         rt = await hf("GET", f"/api/spaces/{x['id']}/runtime")
         out["stage"] = rt.get("stage")
@@ -188,12 +219,32 @@ async def comfy_info(request):
         out["stage"] = "GONE" if e.status == 404 else "ERROR"
     except Exception:
         out["stage"] = "UNKNOWN"
-    return web.json_response(out)
+    return out
+
+
+def base_path(slot):
+    """Adresse fuer die Oberflaeche: GPU 1 = /easy/remote, GPU 2 = /easy/remote2 ..."""
+    return "/easy/remote" if slot <= 1 else f"/easy/remote{slot}"
+
+
+@routes.get("/easy/cloud/comfy/info")
+async def comfy_info(request):
+    x = comfy_entry(req_slot(request))
+    if not x:
+        return web.json_response({"exists": False, "space_token": bool(space_token()), "version": VERSION})
+    return web.json_response(await _info(x))
+
+
+@routes.get("/easy/cloud/comfy/list")
+async def comfy_list(request):
+    xs = comfy_entries()
+    items = await asyncio.gather(*[_info(x) for x in xs]) if xs else []
+    return web.json_response({"items": list(items), "space_token": bool(space_token()), "version": VERSION})
 
 
 # ------------------------------------------------------------------ Durchreichen an die Cloud-GPU
-async def target():
-    x = comfy_entry()
+async def target(slot=1):
+    x = comfy_entry(slot)
     if not x:
         raise web.HTTPNotFound(text="Keine Cloud-GPU eingerichtet.")
     host = x.get("host")
@@ -231,9 +282,8 @@ def session():
     return s
 
 
-@routes.get("/easy/remote/ws")
-async def remote_ws(request):
-    host = await target()
+async def remote_ws(request, slot=1):
+    host = await target(slot)
     headers = auth_headers()
     url = host.replace("https://", "wss://", 1) + "/ws?clientId=" + request.query.get("clientId", "eg")
     local = web.WebSocketResponse(heartbeat=30)
@@ -260,14 +310,15 @@ async def remote_ws(request):
     return local
 
 
-@routes.route("*", "/easy/remote/{tail:.*}")
+@routes.route("*", r"/easy/remote{slot:\d*}/{tail:.*}")
 async def remote_proxy(request):
     tail = request.match_info["tail"]
+    slot = int(request.match_info.get("slot") or 1)
     if tail == "ws":
-        return await remote_ws(request)
+        return await remote_ws(request, slot)
     if tail in ("prompt", "easy/models/download", "upload/image"):
-        ACT["last"] = time.time()          # echte Nutzung -> Leerlauf-Uhr zuruecksetzen
-    host = await target()
+        act(slot)["last"] = time.time()    # echte Nutzung -> Leerlauf-Uhr zuruecksetzen
+    host = await target(slot)
     headers = auth_headers()
     if request.headers.get("Content-Type"):
         headers["Content-Type"] = request.headers["Content-Type"]
@@ -301,7 +352,7 @@ async def comfy_fetch(request):
     """Ergebnisse von der Cloud-GPU auf den PC holen und in die Galerie einsortieren."""
     from . import gallery
     data = await request.json()
-    host = await target()
+    host = await target(req_slot(request, data))
     headers = auth_headers()
     outdir = os.path.join(gallery.output_dir(), "easy-cloud-gpu")
     os.makedirs(outdir, exist_ok=True)
@@ -331,36 +382,59 @@ async def comfy_fetch(request):
 # ------------------------------------------------------------------ Leerlauf-Waechter
 # Unabhaengig von HuggingFace: Laeuft die Cloud-GPU laenger als die eingestellte Zeit ohne Auftrag,
 # pausiert Easy Generate sie selbst. (Wird regelmaessig von der Oberflaeche angestossen.)
-ACT = {"last": time.time(), "checked": 0, "busy": False}
+ACT = {"last": time.time(), "checked": 0, "busy": False}   # "last" = GPU 1 (alt), weitere GPUs in SLOTS
+SLOTS = {}
+
+
+def act(slot=1):
+    if slot <= 1:
+        return ACT
+    return SLOTS.setdefault(slot, {"last": time.time()})
+
+
+def touch_space(sid):
+    """Leerlauf-Uhr der GPU zuruecksetzen, zu der dieser Space gehoert."""
+    for x in comfy_entries():
+        if x["id"] == sid:
+            act(slot_of(x))["last"] = time.time()
 
 
 async def _idle_check():
-    x = comfy_entry()
-    if not x or not token():
+    if not token():
         return
+    for x in comfy_entries():
+        try:
+            await _idle_one(x)
+        except Exception as err:
+            print("[Easy Generate] Leerlauf-Pruefung:", err)
+
+
+async def _idle_one(x):
+    slot = slot_of(x)
+    A = act(slot)
     try:
         rt = await hf("GET", f"/api/spaces/{x['id']}/runtime", timeout=15)
     except Exception:
         return
     if rt.get("stage") != "RUNNING":
-        ACT["last"] = time.time()          # Uhr laeuft erst, wenn sie wirklich bereit ist
+        A["last"] = time.time()            # Uhr laeuft erst, wenn sie wirklich bereit ist
         return
     limit = int(x.get("sleep") or 900)
-    if time.time() - ACT["last"] < limit:
+    if time.time() - A["last"] < limit:
         return
     # Laeuft gerade etwas? Dann nicht pausieren.
     try:
-        host = await target()
+        host = await target(slot)
         headers = auth_headers()
         async with session().get(host + "/queue", headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
             q = await r.json() if r.status == 200 else {}
         if q.get("queue_running") or q.get("queue_pending"):
-            ACT["last"] = time.time()
+            A["last"] = time.time()
             return
         async with session().get(host + "/easy/models/status", headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
             ms = await r.json() if r.status == 200 else {}
         if ms.get("running"):
-            ACT["last"] = time.time()
+            A["last"] = time.time()
             return
     except Exception:
         pass
@@ -395,5 +469,5 @@ def tick():
 
 @routes.post("/easy/cloud/comfy/touch")
 async def comfy_touch(request):
-    ACT["last"] = time.time()
+    act(req_slot(request))["last"] = time.time()
     return web.json_response({"ok": True})

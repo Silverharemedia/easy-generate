@@ -957,7 +957,7 @@ def _resume_watches():
 async def _wake(sid):
     try:
         from . import remote as _r
-        _r.ACT["last"] = time.time()
+        _r.touch_space(sid)
     except Exception:
         pass
     try:

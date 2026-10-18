@@ -431,7 +431,7 @@ const state = {
   active: { video: "", image: "" },
   aspect: store.get("aspect", { video: "16:9", image: "1:1" }),
   size: store.get("size", "normal"), seconds: store.get("sec", 5), batch: 1,
-  images: {}, run: null, catalog: [], mKind: "video"
+  images: {}, catalog: [], mKind: "video"
 };
 
 /* ================= Workflow-Analyse ================= */
@@ -608,10 +608,10 @@ function renderStudio(){
   $("#stTitle").textContent = K.title;
   $("#stSub").textContent = k === "video" ? "Beschreibe eine Szene oder gib ein Startbild vor." : "Beschreibe dein Bild – oder lade ein Bild zum Bearbeiten hoch (je nach Modell).";
   chips($("#computeSw"), [["local", { n: "🖥️ Mein PC" }], ["gpu", { n: "🚀 Meine Cloud-GPU" }], ["cloud", { n: "☁️ HuggingFace-Cloud" }]], state.compute[k], c => { state.compute[k] = c; store.set("compute", state.compute); renderStudio(); });
-  renderGpuBar();
+  renderGpuBar(); renderQueue();
   if(state.compute[k] === "gpu"){
-    if(!gpu.info){ loadGpuInfo().then(() => { if(state.compute[state.kind] === "gpu") renderStudio(); }); }
-    else if(!gpu.info.exists){ $("#cloudCard").classList.add("hidden"); $("#studioBody").classList.add("hidden"); gpuSetupCard(); return; }
+    if(!gpu.list){ loadGpuInfo().then(() => { if(state.compute[state.kind] === "gpu") renderStudio(); }); }
+    else if(!gpu.list.length || gpu.adding){ $("#cloudCard").classList.add("hidden"); $("#studioBody").classList.add("hidden"); $("#toolRow").classList.add("hidden"); gpuSetupCard(); return; }
   }
   const isCloud = state.compute[k] === "cloud";
   $("#cloudCard").classList.toggle("hidden", !isCloud);
@@ -692,8 +692,9 @@ function renderStudio(){
 function updateGo(){
   const info = curInfo();
   if($("#cGo")){ $("#cGo").disabled = !!state.run || !!cloud.run || !online; }
-  $("#go").disabled = !info || gpuPrep.active || !!(typeof cloud !== "undefined" && cloud.run) || !online;
-  $("#goHint").textContent = !online ? "ComfyUI läuft nicht." : state.run ? "Es wird gerade etwas erstellt – weitere Aufträge kommen in die Warteschlange." : (info && !info.pos ? "Dieses Werkzeug braucht keinen Text – einfach die Eingabe auswählen und starten." : "");
+  const b = curB();
+  $("#go").disabled = !info || !!(b && gpuPrep[b]) || !!(typeof cloud !== "undefined" && cloud.run) || !online;
+  $("#goHint").textContent = !online ? "ComfyUI läuft nicht." : state.runs.some(r => r.B === b) ? "Es wird gerade etwas erstellt – weitere Aufträge kommen in die Warteschlange." : (info && !info.pos ? "Dieses Werkzeug braucht keinen Text – einfach die Eingabe auswählen und starten." : "");
 }
 $("#toolSel").onchange = e => { state.active[state.kind] = e.target.value; api("/easy/config", { active: state.active }); renderStudio(); };
 $("#moreModels").onclick = () => { state.mKind = state.kind; state.instTarget = state.compute[state.kind] === "gpu" ? "gpu" : "local"; showTab("models"); };
@@ -744,7 +745,7 @@ async function checkStatus(){
 function connectWS(){
   try{
     ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws?clientId=" + cid);
-    ws.onmessage = e => { if(typeof e.data === "string"){ try{ onWS(JSON.parse(e.data)); }catch(err){} } };
+    ws.onmessage = e => { if(typeof e.data === "string"){ try{ onWS(JSON.parse(e.data), ""); }catch(err){} } };
     ws.onclose = () => setTimeout(connectWS, 2000);
   }catch(e){ setTimeout(connectWS, 3000); }
 }
@@ -758,27 +759,45 @@ function friendly(text){
   if(/missing_node_type|does not exist|not found.*node/i.test(text)) return text + "\n\n→ Ein Baustein fehlt. Unter Einstellungen „ComfyUI aktualisieren“ ausführen.";
   return text;
 }
+/* ---------- Aufträge ----------
+   Jeder Rechner (dein PC, GPU 1, GPU 2 …) arbeitet seinen eigenen Auftrag ab – alle gleichzeitig.
+   Weitere Aufträge für denselben Rechner warten in der Warteschlange. Alles übersteht auch Neuladen (z. B. Sprachwechsel). */
+state.runs = [];      // laufende Aufträge, höchstens einer je Rechner (B = "" für den PC, "/easy/remote…" für eine Cloud-GPU)
+state.queue = [];     // wartende Aufträge
+state.submitting = {};
+Object.defineProperty(state, "run", { configurable: true, get(){ return focusRun(); } });
+function curB(){ const c = state.compute[state.kind]; return c === "gpu" ? gpuB() : c === "cloud" ? null : ""; }
+function focusRun(){ const b = curB(); return state.runs.find(r => r.B === b) || state.runs[0] || null; }
+function laneName(B){
+  if(!B) return "🖥️ " + T("Mein PC");
+  const e = gpuEntry(B);
+  return "🚀 GPU " + (e ? e.slot : "?") + (e && hwOf(e).pretty ? " · " + hwOf(e).pretty : "");
+}
+const multiLane = () => new Set([...state.runs, ...state.queue].map(j => j.B).concat(Object.keys(gpuPrep).filter(b => gpuPrep[b]))).size > 1;
+const lanePrefix = run => multiLane() || run.B !== curB() ? (run.B ? "🚀 GPU " + slotOfB(run.B) : "🖥️ " + T("Mein PC")) + ": " : "";
+
 async function generate(){
   const k = state.kind, key = state.active[k], info = curInfo();
   if(!info) return;
   if(!$("#prompt").value.trim() && info.pos){ showMsg("warn", "Bitte beschreibe zuerst, was entstehen soll."); return; }
   const missingImg = info.images.find(im => !state.images[im.id]);
   if(missingImg){ showMsg("warn", `Bitte zuerst „${missingImg.title}“ auswählen.`); return; }
-
-  const queued = !!state.run;
-  if(!queued){ $("#out").innerHTML = ""; $("#resActions").classList.add("hidden"); }
+  const B = state.compute[k] === "gpu" ? gpuB() : "";
+  if(B == null){ showMsg("warn", "Es ist noch keine Cloud-GPU eingerichtet."); return; }
+  if(B && gpuPrep[B]) return;
+  if(!state.runs.length && !Object.values(gpuPrep).some(Boolean)){ $("#out").innerHTML = ""; $("#resActions").classList.add("hidden"); }
   let seed;
   if($("#seedRand").checked){ seed = Math.floor(Math.random() * 2 ** 48); $("#seed").value = seed; }
   else seed = Math.max(0, parseInt($("#seed").value || "0", 10));
-  const B = state.compute[k] === "gpu" ? "/easy/remote" : "";
-  state.submitting = !!B; clearTimeout(autoPauseT);
+  const promptText = $("#prompt").value.trim(), units = workUnits(), est = estimate();
+  state.submitting[B] = true; clearTimeout(autoPauseT[B]);
   try{
-    if(B && !(await gpuPrepare(key))) return;
+    if(B && !(await gpuPrepare(key, B))) return;
     const names = {};
     for(const im of info.images) names[im.id] = await uploadImage(state.images[im.id], B);
     const wf = buildPrompt(names, seed);
     let rpSeq = null;
-    if(B){ openRemoteWS(); try{ rpSeq = (await api(B + "/easy/progress?since=999999999")).seq || 0; }catch(e){} }
+    if(B){ try{ rpSeq = (await api(B + "/easy/progress?since=999999999")).seq || 0; }catch(e){} }
     const r = await fetch(B + "/prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: wf, client_id: cid }) });
     const j = await r.json().catch(() => ({}));
     if(!r.ok || j.error){
@@ -787,89 +806,125 @@ async function generate(){
       showMsg("err", friendly(lines.join("\n"))); return;
     }
     const tool = state.installed.find(t => t.name === key);
-    const job = { id: j.prompt_id, key, kind: k, B, rpSeq, start: Date.now(), sub: Date.now(), total: Object.keys(wf).length, done: new Set(), step: 0, max: 0, finished: false, wf: slimWf(wf), units: workUnits(), est: estimate(), prompt: $("#prompt").value.trim(), title: tool ? tool.title : key };
-    if(state.run){
+    const job = { id: j.prompt_id, key, kind: k, B, rpSeq, start: Date.now(), sub: Date.now(), total: Object.keys(wf).length, wf: slimWf(wf), units, est, prompt: promptText, title: tool ? tool.title : key };
+    if(state.runs.some(x => x.B === B)){
       state.queue.push(job); saveJobs(); renderQueue();
-      toast("📋 " + esc(T("In die Warteschlange gestellt")) + ` (${state.queue.length + 1})`, "ok", 3000);
+      toast("📋 " + esc(T("In die Warteschlange gestellt")) + ` – ${esc(laneName(B))} (${state.queue.filter(x => x.B === B).length + 1})`, "ok", 3000);
     } else startJob(job);
-    updateGo();
-  }catch(e){ if(!state.run) $("#progBox").classList.add("hidden"); updateGo(); renderQueue(); if(queued) toast("❌ " + esc(T(friendly(gpuErr(String(e.message || e))))), "err", 8000); else showMsg("err", friendly(gpuErr(String(e.message || e)))); }
-  finally{ if(state.submitting){ state.submitting = false; if(B) maybeAutoPause(); } }
+  }catch(e){ toast("❌ " + esc(T(friendly(gpuErr(String(e.message || e))))), "err", 8000); if(!state.runs.length) showMsg("err", friendly(gpuErr(String(e.message || e)))); }
+  finally{ state.submitting[B] = false; paint(); renderQueue(); updateGo(); if(B) maybeAutoPause(B); }
 }
-function tick(){
-  const run = state.run; if(!run) return;
-  $("#timeTxt").textContent = fmtTime((Date.now() - run.start) / 1000);
-  $("#etaRun").textContent = runEtaText(run);
-  run.timer = setTimeout(tick, 1000);
+function startJob(job, keepStart){
+  if(!keepStart) job.start = Date.now();
+  Object.assign(job, { done: new Set(), step: 0, max: 0, finished: false, txt: "In der Warteschlange …", pct: 2, rpSeq: job.rpSeq ?? null });
+  state.runs.push(job);
+  saveJobs(); renderQueue(); paint(); tick(job);
+}
+function tick(run){
+  if(!state.runs.includes(run)) return;
+  run.timer = setTimeout(() => tick(run), 1000);
+  paint();
   if(run.B){ remoteProgress(run); return; }
   const every = !ws || ws.readyState !== 1 ? 3000 : 10000;   // auch bei Live-Verbindung ab und zu nachsehen (Auftrag kann schon fertig sein)
-  if(!run.poll || Date.now() - run.poll > every){ run.poll = Date.now(); pollDone(); }
+  if(!run.poll || Date.now() - run.poll > every){ run.poll = Date.now(); pollDone(run); }
 }
-function updateBar(){
-  const run = state.run; if(!run) return;
-  const pct = Math.min(99, ((run.done.size + (run.max ? run.step / run.max : 0)) / Math.max(1, run.total)) * 100);
-  $("#bar").style.width = Math.max(2, pct) + "%";
+// Fortschritt anzeigen: großer Balken = Auftrag des gerade gewählten Rechners, alle anderen in der Liste
+function paint(){
+  if(cloud.run) return;                       // HuggingFace-Cloud nutzt den Balken gerade selbst
+  const b = curB(), run = focusRun(), prep = !state.runs.some(r => r.B === b) && b && gpuPrep[b];
+  const box = $("#progBox");
+  if(prep){
+    box.classList.remove("hidden");
+    $("#progTxt").textContent = T(prep.txt || "Bereite vor …"); $("#bar").style.width = Math.max(2, prep.pct || 2) + "%";
+    $("#timeTxt").textContent = fmtTime((Date.now() - prep.start) / 1000); $("#etaRun").textContent = "";
+  } else if(run){
+    box.classList.remove("hidden");
+    $("#progTxt").textContent = T(lanePrefix(run)) + T(run.txt || "");
+    $("#bar").style.width = Math.max(2, run.pct || 2) + "%";
+    $("#timeTxt").textContent = fmtTime((Date.now() - run.start) / 1000); $("#etaRun").textContent = runEtaText(run);
+  } else box.classList.add("hidden");
+  for(const r of state.runs){ const el = document.getElementById("qs-" + r.id); if(el) el.textContent = T(r.txt || ""); }
+  for(const [B, p] of Object.entries(gpuPrep)){ const el = document.getElementById("qp-" + slugB(B)); if(p && el) el.textContent = T(p.txt || "Bereite vor …"); }
 }
-function onWS(m){
-  const run = state.run, d = m.data || {};
-  if(!run || (d.prompt_id && d.prompt_id !== run.id)) return;
-  if(m.type === "execution_start") $("#progTxt").textContent = "Läuft …";
+const slugB = B => (B || "pc").replace(/\W/g, "");
+function updateBar(run){ run.pct = Math.min(99, ((run.done.size + (run.max ? run.step / run.max : 0)) / Math.max(1, run.total)) * 100); }
+function onWS(m, B){
+  const d = m.data || {};
+  const run = state.runs.find(r => r.B === (B || "") && (!d.prompt_id || d.prompt_id === r.id));
+  if(!run || run.finished) return;
+  if(m.type === "execution_start") run.txt = "Läuft …";
   if(m.type === "execution_cached") (d.nodes || []).forEach(n => run.done.add(String(n)));
   if(m.type === "executing"){
-    if(d.node == null){ finish(); return; }
+    if(d.node == null){ finish(run); return; }
     if(run.cur) run.done.add(run.cur);
     run.cur = String(d.node); run.step = 0; run.max = 0;
     const n = run.wf[run.cur];
-    $("#progTxt").textContent = "Arbeite: " + (n ? (n._meta && n._meta.title) || n.class_type : run.cur);
+    run.txt = "Arbeite: " + (n ? (n._meta && n._meta.title) || n.class_type : run.cur);
   }
-  if(m.type === "progress"){ if(d.value <= 1 || d.max !== run.max) run.samplerStart = Date.now(); run.step = d.value; run.max = d.max; $("#progTxt").textContent = `Schritt ${d.value} von ${d.max}`; }
-  if(m.type === "execution_success") finish();
-  if(m.type === "execution_error"){ fail(friendly(`${d.node_type || ""}: ${d.exception_message || "Fehler"}`)); return; }
-  if(m.type === "execution_interrupted"){ fail("Abgebrochen."); return; }
-  updateBar();
+  if(m.type === "progress"){ if(d.value <= 1 || d.max !== run.max) run.samplerStart = Date.now(); run.step = d.value; run.max = d.max; run.txt = `Schritt ${d.value} von ${d.max}`; }
+  if(m.type === "execution_success"){ finish(run); return; }
+  if(m.type === "execution_error"){ fail(run, friendly(`${d.node_type || ""}: ${d.exception_message || "Fehler"}`)); return; }
+  if(m.type === "execution_interrupted"){ fail(run, "Abgebrochen."); return; }
+  updateBar(run); paint();
 }
-async function pollDone(){
-  const run = state.run; if(!run) return;
+async function pollDone(run){
+  if(!run || !state.runs.includes(run)) return;
   try{
     const j = await (await fetch((run.B || "") + "/history/" + run.id, { cache: "no-store" })).json();
     const h = j[run.id];
-    if(h && h.status && h.status.completed) finish();
-    else if(h && h.status && h.status.status_str === "error") fail("Fehler beim Erstellen. Details stehen im ComfyUI-Protokoll.");
+    if(h && h.status && h.status.completed) finish(run);
+    else if(h && h.status && h.status.status_str === "error") fail(run, "Fehler beim Erstellen. Details stehen im ComfyUI-Protokoll.");
   }catch(e){}
 }
-function endRun(){
-  const run = state.run; if(run) clearTimeout(run.timer); if(run && run.B) closeRemoteWS(); state.run = null; $("#progBox").classList.add("hidden");
-  if(state.queue.length) startJob(state.queue.shift());   // nächsten Auftrag aus der Warteschlange verfolgen
-  saveJobs(); renderQueue(); updateGo();
+function endRun(run){
+  if(!run) return;
+  clearTimeout(run.timer);
+  state.runs = state.runs.filter(r => r !== run);
+  const next = state.queue.find(j => j.B === run.B);           // nächster Auftrag für denselben Rechner
+  if(next){ state.queue = state.queue.filter(j => j !== next); startJob(next); }
+  saveJobs(); renderQueue(); paint(); updateGo();
 }
-/* ---------- Warteschlange (übersteht auch Neuladen, z. B. beim Sprachwechsel) ---------- */
-state.queue = [];
 function slimWf(wf){ const o = {}; for(const [id, n] of Object.entries(wf || {})) o[id] = { class_type: n.class_type, _meta: n._meta }; return o; }
-function startJob(job, keepStart){
-  state.run = job; if(!keepStart) job.start = Date.now(); job.done = job.done instanceof Set ? job.done : new Set(); job.step = 0; job.max = 0; job.finished = false; job.rpSeq = job.rpSeq ?? null;
-  if(job.B) openRemoteWS();
-  $("#progBox").classList.remove("hidden"); $("#progTxt").textContent = "In der Warteschlange …"; $("#bar").style.width = "2%";
-  saveJobs(); renderQueue(); tick();
-}
 function saveJobs(){
   const pick = j => ({ id: j.id, key: j.key, kind: j.kind, B: j.B, sub: j.sub, start: j.start, total: j.total, wf: j.wf, units: j.units, est: j.est, prompt: j.prompt, title: j.title });
-  store.set("jobs", [state.run, ...state.queue].filter(Boolean).map(pick));
+  store.set("jobs", [...state.runs, ...state.queue].map(pick));
 }
 function renderQueue(){
   const el = $("#queueBox"); if(!el) return;
-  const all = [state.run, ...state.queue].filter(Boolean);
-  if(all.length < 2 && !(gpuPrep.active && state.run)){ el.classList.add("hidden"); el.innerHTML = ""; return; }
+  const all = [...state.runs, ...state.queue];
+  const preps = Object.entries(gpuPrep).filter(([B, p]) => p && state.runs.some(r => r.B === B));   // Vorbereitung, während dort schon etwas läuft
+  const lanes = [...new Set(all.map(j => j.B).concat(preps.map(([B]) => B)))];
+  const focus = focusRun();
+  if(all.length + preps.length < 2 && !(focus && focus.B !== curB())){ el.classList.add("hidden"); el.innerHTML = ""; return; }
   el.classList.remove("hidden");
-  const where = j => j.B ? "🚀" : "🖥️";
-  const rows = all.map((j, i) => `<div class="qitem ${i === 0 ? "run" : ""}" title="${esc(j.prompt || "")}"><span class="qn">${i === 0 ? "▶" : i + 1}</span><span class="qt">${where(j)} <b>${esc(j.title || j.key)}</b> · ${esc((j.prompt || "").slice(0, 80) || "–")}</span><span class="qs">${i === 0 ? T("läuft") : T("wartet")}</span>${i > 0 ? `<button class="qx" type="button" data-q="${esc(j.id)}" title="${esc(T("Aus der Warteschlange entfernen"))}">✕</button>` : ""}</div>`);
-  if(gpuPrep.active && state.run) rows.push(`<div class="qitem"><span class="qn">…</span><span class="qt">🚀 ${esc(T(gpuPrep.txt || "Bereite vor …"))}</span></div>`);
-  el.innerHTML = `<h4>📋 ${esc(T("Warteschlange"))} (${all.length})</h4>` + rows.join("");
+  const x = (id, title) => `<button class="qx" type="button" data-q="${esc(id)}" title="${esc(T(title))}">✕</button>`;
+  let html = `<h4>📋 ${esc(T("Warteschlange"))} (${all.length})</h4>`;
+  for(const B of lanes){
+    const items = [...state.runs.filter(r => r.B === B), ...state.queue.filter(j => j.B === B)];
+    if(lanes.length > 1) html += `<div class="hint" style="margin:8px 0 4px;font-weight:600">${esc(laneName(B))}</div>`;
+    html += items.map((j, i) => {
+      const running = state.runs.includes(j);
+      return `<div class="qitem ${running ? "run" : ""}" title="${esc(j.prompt || "")}"><span class="qn">${running ? "▶" : i + 1}</span><span class="qt"><b>${esc(j.title || j.key)}</b> · ${esc((j.prompt || "").slice(0, 80) || "–")}</span><span class="qs" ${running ? `id="qs-${esc(j.id)}"` : ""}>${esc(running ? T(j.txt || "läuft") : T("wartet"))}</span>${running ? x(j.id, "Abbrechen") : x(j.id, "Aus der Warteschlange entfernen")}</div>`;
+    }).join("");
+    const p = gpuPrep[B];
+    if(p && state.runs.some(r => r.B === B)) html += `<div class="qitem"><span class="qn">…</span><span class="qt" id="qp-${slugB(B)}">${esc(T(p.txt || "Bereite vor …"))}</span></div>`;
+  }
+  el.innerHTML = html;
   el.querySelectorAll("[data-q]").forEach(b => b.onclick = () => removeQueued(b.dataset.q));
+  paint();
 }
 async function removeQueued(id){
+  const run = state.runs.find(r => r.id === id);
+  if(run){ cancelRun(run); return; }
   const j = state.queue.find(x => x.id === id); if(!j) return;
   state.queue = state.queue.filter(x => x !== j); saveJobs(); renderQueue();
   try{ await api((j.B || "") + "/queue", { delete: [id] }); }catch(e){}
+  if(j.B) maybeAutoPause(j.B);
+}
+async function cancelRun(run){
+  try{ await api((run.B || "") + "/queue", { delete: [run.id] }); }catch(e){}
+  try{ await fetch((run.B || "") + "/interrupt", { method: "POST" }); }catch(e){}
+  fail(run, "Abgebrochen.");
 }
 // Nach dem Neuladen: Aufträge wieder aufnehmen, die der Server noch kennt
 async function restoreJobs(){
@@ -887,30 +942,38 @@ async function restoreJobs(){
     }catch(e){ keep.push(j); }
   }
   if(!keep.length){ store.set("jobs", []); return; }
-  state.queue = keep.slice(1).map(j => Object.assign(j, { done: new Set(), rpSeq: null }));
-  startJob(Object.assign(keep[0], { rpSeq: null }), true);
-  updateGo();
+  for(const j of keep){
+    if(state.runs.some(r => r.B === j.B)) state.queue.push(j);
+    else startJob(Object.assign(j, { rpSeq: null }), true);
+  }
+  saveJobs(); renderQueue(); updateGo();
 }
-function fail(text){ const wasB = state.run && state.run.B; endRun(); showMsg(text === "Abgebrochen." ? "warn" : "err", text); if(wasB) maybeAutoPause(); }
-// ☕ Nach der Warteschlange die Cloud-GPU sofort pausieren (erst wenn alle Ergebnisse abgeholt sind)
-let autoPauseT = null;
-function gpuBusy(){ return gpuPrep.active || state.submitting || [state.run, ...state.queue].some(j => j && j.B); }
-function maybeAutoPause(){
-  if(!store.get("gpuPauseAfter", false) || gpuBusy()) return;
-  clearTimeout(autoPauseT);
-  autoPauseT = setTimeout(async () => {
-    if(!store.get("gpuPauseAfter", false) || gpuBusy()) return;   // inzwischen neuer Auftrag? Dann nicht pausieren
-    const info = gpu.info || await loadGpuInfo();
-    if(!info || !info.exists || !info.id || ["PAUSED", "SLEEPING", "STOPPED"].includes(info.stage)) return;
+function fail(run, text){
+  if(!run) return;
+  run.finished = true; endRun(run);
+  showMsg(text === "Abgebrochen." ? "warn" : "err", lanePrefix(run) + T(text));
+  if(run.B) maybeAutoPause(run.B);
+}
+// ☕ Nach der Warteschlange die Cloud-GPU sofort pausieren (erst wenn alle Ergebnisse abgeholt sind) – je GPU einzeln
+const autoPauseT = {};
+function gpuBusy(B){ return !!gpuPrep[B] || !!state.submitting[B] || [...state.runs, ...state.queue].some(j => j.B === B) || !!(state.fetching || {})[B]; }
+function maybeAutoPause(B){
+  if(!B || !store.get("gpuPauseAfter", false) || gpuBusy(B)) return;
+  clearTimeout(autoPauseT[B]);
+  autoPauseT[B] = setTimeout(async () => {
+    if(!store.get("gpuPauseAfter", false) || gpuBusy(B)) return;   // inzwischen neuer Auftrag? Dann nicht pausieren
+    await loadGpuInfo();
+    const info = gpuEntry(B);
+    if(!info || !info.id || ["PAUSED", "SLEEPING", "STOPPED"].includes(info.stage)) return;
     const r = await api("/easy/cloud/rented/pause", { space: info.id });
     if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
-    toast("☕ " + esc(T("Warteschlange fertig – Cloud-GPU pausiert. Es entstehen keine Kosten mehr.")), "ok", 10000);
-    gpu.info = null; if(state.tab === "video" || state.tab === "image") renderStudio();
+    toast("☕ " + esc((gpu.list.length > 1 ? `GPU ${info.slot}: ` : "") + T("Warteschlange fertig – Cloud-GPU pausiert. Es entstehen keine Kosten mehr.")), "ok", 10000);
+    await loadGpuInfo(); if(state.tab === "video" || state.tab === "image") renderStudio();
   }, 4000);
 }
-async function finish(){
-  const run = state.run; if(!run || run.finished) return;
-  run.finished = true; $("#bar").style.width = "100%"; $("#progTxt").textContent = "Fertig – lade Ergebnis …";
+async function finish(run){
+  if(!run || run.finished) return;
+  run.finished = true; run.pct = 100; run.txt = "Fertig – lade Ergebnis …"; paint();
   let files = [];
   for(let i = 0; i < 5 && !files.length; i++){
     try{ const j = await (await fetch((run.B || "") + "/history/" + run.id, { cache: "no-store" })).json(); if(j[run.id]) files = mediaFiles(j[run.id].outputs); }catch(e){}
@@ -918,20 +981,26 @@ async function finish(){
   }
   const secs = (Date.now() - run.start) / 1000;
   recordRun((run.B ? "gpu:" : "") + run.key, run.units, secs);
-  endRun();
+  state.fetching = state.fetching || {}; if(run.B) state.fetching[run.B] = (state.fetching[run.B] || 0) + 1;
+  endRun(run);
   if(state.tab === "video" || state.tab === "image") renderEta();
-  if(!files.length){ showMsg("warn", "Fertig, aber keine Ausgabe gefunden. Schau in den Ausgabe-Ordner."); return; }
-  const tool = state.installed.find(t => t.name === run.key);
-  if(run.B){
-    showMsg("ok", "Fertig – hole das Ergebnis von der Cloud-GPU …");
-    const fr = await api("/easy/cloud/comfy/fetch", { files, model: tool ? tool.title : run.key, kind: run.kind, prompt: run.prompt ?? $("#prompt").value.trim() });
-    maybeAutoPause();
-    if(!fr.files || !fr.files.length){ showMsg("err", "Das Ergebnis konnte nicht von der Cloud-GPU geholt werden."); return; }
-    files = fr.files;
-    setTimeout(() => refreshGpuMoney(true), 5000);   // Guthaben nach dem Erstellen auffrischen
-  } else files = await toGallery(files, tool ? tool.title : run.key, run.kind, run.prompt ?? $("#prompt").value.trim());
-  showResult(files);
-  showMsg("ok", `Fertig in ${fmtTime(secs)} Min.`);
+  const pre = lanePrefix(run);
+  try{
+    if(!files.length){ showMsg("warn", pre + T("Fertig, aber keine Ausgabe gefunden. Schau in den Ausgabe-Ordner.")); return; }
+    const tool = state.installed.find(t => t.name === run.key);
+    if(run.B){
+      if(!state.runs.length) showMsg("ok", pre + T("Fertig – hole das Ergebnis von der Cloud-GPU …"));
+      const slot = (gpuEntry(run.B) || {}).slot || slotOfB(run.B);
+      const fr = await api("/easy/cloud/comfy/fetch", { files, slot, model: tool ? tool.title : run.key, kind: run.kind, prompt: run.prompt ?? "" });
+      if(!fr.files || !fr.files.length){ showMsg("err", pre + T("Das Ergebnis konnte nicht von der Cloud-GPU geholt werden.")); return; }
+      files = fr.files;
+      setTimeout(() => refreshGpuMoney(true), 5000);   // Guthaben nach dem Erstellen auffrischen
+    } else files = await toGallery(files, tool ? tool.title : run.key, run.kind, run.prompt ?? "");
+    showResult(files);
+    showMsg("ok", pre + T(`Fertig in ${fmtTime(secs)} Min.`) + (run.prompt ? " – " + run.prompt.slice(0, 60) : ""));
+  } finally {
+    if(run.B){ state.fetching[run.B]--; maybeAutoPause(run.B); }
+  }
 }
 function mediaFiles(outputs){
   const res = [];
@@ -979,152 +1048,178 @@ $("#again").onclick = () => {
 };
 $("#stop").onclick = async () => {
   if(cloud.run){ cloudCancel(); return; }
-  if(gpuPrep.active){ gpuPrep.cancel = true; return; }
-  const run = state.run; if(!run) return;
-  try{ await api((run.B || "") + "/queue", { delete: [run.id] }); }catch(e){}
-  try{ await fetch((run.B || "") + "/interrupt", { method: "POST" }); }catch(e){}
-  closeRemoteWS();
-  fail("Abgebrochen.");
+  const b = curB();
+  if(b && gpuPrep[b] && !state.runs.some(r => r.B === b)){ gpuPrep[b].cancel = true; return; }
+  const run = focusRun(); if(run) cancelRun(run);
 };
 
-/* ================= Eigene Cloud-GPU (ComfyUI auf gemieteter Grafikkarte) ================= */
-let rws = null;
-function openRemoteWS(){
-  closeRemoteWS();
-  try{
-    rws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/easy/remote/ws?clientId=" + cid);
-    rws.onmessage = e => { if(typeof e.data === "string"){ try{ const m = JSON.parse(e.data); if(m.type !== "eg_remote_error") onWS(m); }catch(err){} } };
-  }catch(e){ rws = null; }
-}
-// Fortschritt der Cloud-GPU zuverlässig per HTTP abholen (zusätzlich zur Live-Verbindung)
+/* ================= Eigene Cloud-GPUs (ComfyUI auf gemieteten Grafikkarten – auch mehrere gleichzeitig) ================= */
+// Fortschritt der Cloud-GPU zuverlässig per HTTP abholen
 async function remoteProgress(run){
   if(run.rpBusy || Date.now() - (run.rpAt || 0) < 2000) return;
   run.rpBusy = true; run.rpAt = Date.now();
+  const alive = () => state.runs.includes(run) && !run.finished;
   try{
     const j = await api(run.B + "/easy/progress?since=" + (run.rpSeq || 0));
-    if(state.run !== run) return;
+    if(!alive()) return;
     if(run.rpSeq == null){ run.rpSeq = j.seq || 0; }    // erster Abruf: nur Startpunkt merken
     else {
-      for(const e of j.events || []){ run.rpSeq = Math.max(run.rpSeq, e.seq); if(state.run === run) onWS({ type: e.type, data: e.data || {} }); }
+      for(const e of j.events || []){ run.rpSeq = Math.max(run.rpSeq, e.seq); if(alive()) onWS({ type: e.type, data: e.data || {} }, run.B); }
       if(j.seq != null) run.rpSeq = Math.max(run.rpSeq, j.seq);
     }
   }catch(e){}
   finally{ run.rpBusy = false; }
-  if(state.run === run && (!run.poll || Date.now() - run.poll > 6000)){ run.poll = Date.now(); pollDone(); }
+  if(alive() && (!run.poll || Date.now() - run.poll > 6000)){ run.poll = Date.now(); pollDone(run); }
   // Hat die Cloud-GPU den Auftrag verloren (z. B. neu gestartet)? Dann nicht ewig warten.
-  if(state.run === run && Date.now() - (run.qAt || run.start) > 20000){
+  if(alive() && Date.now() - (run.qAt || run.start) > 20000){
     run.qAt = Date.now();
     try{
       const q = await api(run.B + "/queue");
       const has = arr => (arr || []).some(e => e && e[1] === run.id);
       if(q && !q.error && !has(q.queue_running) && !has(q.queue_pending)){
         const h = await api(run.B + "/history/" + run.id);
-        if(!h || !h[run.id]){ run.lost = (run.lost || 0) + 1; if(run.lost >= 2 && state.run === run) fail("Die Cloud-GPU hat den Auftrag nicht mehr (vermutlich neu gestartet oder pausiert). Bitte nochmal erstellen."); }
+        if(!h || !h[run.id]){ run.lost = (run.lost || 0) + 1; if(run.lost >= 2 && alive()) fail(run, "Die Cloud-GPU hat den Auftrag nicht mehr (vermutlich neu gestartet oder pausiert). Bitte nochmal erstellen."); }
       } else run.lost = 0;
     }catch(e){}
   }
 }
-function closeRemoteWS(){ try{ if(rws) rws.close(); }catch(e){} rws = null; }
-const gpu = { info: null };
-async function loadGpuInfo(){ try{ gpu.info = await api("/easy/cloud/comfy/info"); }catch(e){ gpu.info = null; } return gpu.info; }
+const gpu = { info: null, list: null, adding: false };
+// Alle eigenen Cloud-GPUs laden; gpu.info = die gerade gewählte
+async function loadGpuInfo(){
+  try{
+    const j = await api("/easy/cloud/comfy/list");
+    gpu.list = j.items || []; gpu.spaceToken = j.space_token; gpu.version = j.version;
+  }catch(e){ gpu.list = gpu.list || []; }
+  const e = gpuSel();
+  gpu.info = e || { exists: false, space_token: gpu.spaceToken, version: gpu.version };
+  return gpu.info;
+}
+const gpuEntry = B => (gpu.list || []).find(x => x.B === B) || null;
+const slotOfB = B => +((B || "").replace("/easy/remote", "") || 1);
+const hwOf = e => ((cloud.hw || []).find(h => h.name === (e.current || e.hardware)) || {});
+// Welche GPU ist gewählt? Pro Modell gemerkt (z. B. GPU 1 für Bild→Video, GPU 2 für Text→Video)
+function gpuSel(){
+  const list = gpu.list || []; if(!list.length) return null;
+  const m = store.get("gpuSlot", {});
+  const want = m[state.active[state.kind]] || m._last || 1;
+  return list.find(x => x.slot === want) || list[0];
+}
+function gpuB(){ const e = gpuSel(); return e ? e.B : null; }
+function pickGpu(slot){
+  const m = store.get("gpuSlot", {});
+  m[state.active[state.kind]] = slot; m._last = slot; store.set("gpuSlot", m);
+  gpu.info = gpuSel(); gpu.adding = false;
+  renderStudio();
+}
 function gpuErr(t){
   if(/^AUTH|401/.test(t)) return "Für die Cloud-GPU fehlt der Space-Schlüssel (nur Lesen). → ☁️ Cloud → „Gratis-Kontingent deines Kontos nutzen“ → Schlüssel anlegen.";
   if(/REMOTE_DOWN/.test(t)) return "Die Cloud-GPU antwortet nicht – sie ist aus oder startet gerade.";
   return t;
 }
-const gpuPrep = { active: false, cancel: false, txt: "" };
+const gpuPrep = {};   // je GPU: { cancel, txt, pct, start } solange sie vorbereitet wird
 // Vor dem Erstellen: Cloud-GPU starten (falls aus), warten bis bereit, fehlende Modelle auf dem Server laden.
-async function gpuPrepare(name){
-  gpuPrep.active = true; gpuPrep.cancel = false; gpuPrep.txt = "";
-  const busy = !!state.run;   // läuft schon etwas? Dann nur in der Warteschlange anzeigen, nicht den Fortschritt überschreiben
-  const box = $("#progBox"), realTxt = $("#progTxt"), realBar = $("#bar");
-  const txt = { set textContent(t){ if(busy){ gpuPrep.txt = t; renderQueue(); } else realTxt.textContent = t; } };
-  const bar = { style: { set width(w){ if(!busy) realBar.style.width = w; } } };
-  if(!busy){ box.classList.remove("hidden"); realBar.style.width = "2%"; $("#etaRun").textContent = ""; }
-  updateGo(); renderQueue();
-  const t0 = Date.now();
-  const timer = setInterval(() => { if(!busy) $("#timeTxt").textContent = fmtTime((Date.now() - t0) / 1000); }, 1000);
-  const done = ok => { clearInterval(timer); gpuPrep.active = false; gpuPrep.txt = ""; if(!ok && !busy) box.classList.add("hidden"); updateGo(); renderQueue(); return ok; };
+async function gpuPrepare(name, B){
+  const prep = gpuPrep[B] = { cancel: false, txt: "", pct: 2, start: Date.now() };
+  const say = (t, pct) => { prep.txt = t; if(pct != null) prep.pct = pct; paint(); };
+  const timer = setInterval(paint, 1000);
+  updateGo(); renderQueue(); paint();
+  const done = ok => { clearInterval(timer); delete gpuPrep[B]; updateGo(); renderQueue(); paint(); if(state.compute[state.kind] === "gpu") renderGpuBar(); return ok; };
+  const pre = () => (gpu.list || []).length > 1 ? `GPU ${slotOfB(B)}: ` : "";
   try{
-    let info = await loadGpuInfo();
-    if(!info || !info.exists){ showMsg("warn", "Es ist noch keine Cloud-GPU eingerichtet."); return done(false); }
+    await loadGpuInfo();
+    let info = gpuEntry(B);
+    if(!info){ showMsg("warn", "Es ist noch keine Cloud-GPU eingerichtet."); return done(false); }
     if(!info.space_token){ showMsg("err", gpuErr("AUTH")); return done(false); }
     const START = { BUILDING: "Die Cloud-GPU wird eingerichtet (beim ersten Mal ca. 10 Min.) …", RUNNING_BUILDING: "Die Cloud-GPU wird aktualisiert …", APP_STARTING: "Die Cloud-GPU startet …", RUNNING_APP_STARTING: "Die Cloud-GPU startet …" };
     let woke = false;
     for(;;){
-      if(gpuPrep.cancel){ showMsg("warn", "Abgebrochen."); return done(false); }
+      if(prep.cancel){ showMsg("warn", pre() + T("Abgebrochen.")); return done(false); }
       if(info.stage === "RUNNING"){
-        const v = await api("/easy/remote/easy/version").catch(() => ({}));
+        const v = await api(B + "/easy/version").catch(() => ({}));
         if(v.version) break;
-        txt.textContent = "Die Cloud-GPU startet ComfyUI …";
+        say("Die Cloud-GPU startet ComfyUI …");
       } else if(["PAUSED", "SLEEPING", "STOPPED"].includes(info.stage)){
         if(!woke){ await api("/easy/cloud/wake", { space: info.id }); woke = true; }
-        txt.textContent = "Schalte die Cloud-GPU ein …";
-      } else if(START[info.stage]) txt.textContent = START[info.stage];
-      else { showMsg("err", `Die Cloud-GPU konnte nicht starten (${info.stage}). Unter ☁️ Cloud → 🖥️ GPU mieten nachsehen.`); return done(false); }
+        say("Schalte die Cloud-GPU ein …");
+      } else if(START[info.stage]) say(START[info.stage]);
+      else { showMsg("err", pre() + T(`Die Cloud-GPU konnte nicht starten (${info.stage}). Unter ☁️ Cloud → 🖥️ GPU mieten nachsehen.`)); return done(false); }
       await new Promise(r => setTimeout(r, 5000));
-      info = await loadGpuInfo();
+      await loadGpuInfo(); const st0 = info.stage; info = gpuEntry(B) || info;
+      if(info.stage !== st0 && state.compute[state.kind] === "gpu") renderGpuBar();
     }
     // Modelle auf dem Server
-    txt.textContent = "Prüfe die Modelle auf der Cloud-GPU …";
-    const prep = await api("/easy/remote/easy/models/prepare", { templates: [name] });
-    const missing = (prep.models || []).filter(m => m.status === "missing");
+    say("Prüfe die Modelle auf der Cloud-GPU …");
+    const prepM = await api(B + "/easy/models/prepare", { templates: [name] });
+    const missing = (prepM.models || []).filter(m => m.status === "missing");
     if(missing.length){
-      const d = await api("/easy/remote/easy/models/download", { models: missing, template: name });
-      if(d.error){ showMsg("err", d.error); return done(false); }
+      const d = await api(B + "/easy/models/download", { models: missing, template: name });
+      if(d.error){ showMsg("err", pre() + d.error); return done(false); }
       for(;;){
-        if(gpuPrep.cancel){ api("/easy/remote/easy/models/cancel", {}); showMsg("warn", "Abgebrochen."); return done(false); }
-        const st = await api("/easy/remote/easy/models/status");
+        if(prep.cancel){ api(B + "/easy/models/cancel", {}); showMsg("warn", pre() + T("Abgebrochen.")); return done(false); }
+        const st = await api(B + "/easy/models/status");
         const mine = (st.items || []).filter(x => x.template === name);
         const err = mine.find(x => x.status === "error");
-        if(err){ showMsg("err", err.name + ": " + (err.error || "Fehler")); return done(false); }
+        if(err){ showMsg("err", pre() + err.name + ": " + (err.error || "Fehler")); return done(false); }
         const got = mine.reduce((a, x) => a + (x.got || 0), 0), tot = mine.reduce((a, x) => a + (x.size || 0), 0);
-        txt.textContent = `Lade Modelle auf die Cloud-GPU: ${GBf(got)} / ${tot ? GBf(tot) : "?"}${st.speed ? ` · ${(st.speed / 1048576).toFixed(0)} MB/s` : ""}`;
-        bar.style.width = (tot ? Math.max(2, got / tot * 100) : 5) + "%";
+        say(`Lade Modelle auf die Cloud-GPU: ${GBf(got)} / ${tot ? GBf(tot) : "?"}${st.speed ? ` · ${(st.speed / 1048576).toFixed(0)} MB/s` : ""}`, tot ? Math.max(2, got / tot * 100) : 5);
         if(!mine.some(x => x.status === "queued" || x.status === "loading")) break;
         await new Promise(r => setTimeout(r, 1500));
       }
     }
-    txt.textContent = "Sende an die Cloud-GPU …"; bar.style.width = "2%";
+    say("Sende an die Cloud-GPU …", 2);
     return done(true);
-  }catch(e){ showMsg("err", gpuErr(String(e.message || e))); return done(false); }
+  }catch(e){ showMsg("err", pre() + T(gpuErr(String(e.message || e)))); return done(false); }
 }
+const STAGE_TXT = { RUNNING: "läuft", PAUSED: "aus – startet automatisch beim Erstellen", SLEEPING: "aus – startet automatisch beim Erstellen", STOPPED: "aus – startet automatisch beim Erstellen", BUILDING: "wird eingerichtet", APP_STARTING: "startet", RUNNING_APP_STARTING: "startet", RUNNING_BUILDING: "wird aktualisiert" };
+const isOn = st => st === "RUNNING" || /STARTING|BUILDING/.test(st || "");
 function renderGpuBar(){
   const el = $("#gpuBar");
   if(state.compute[state.kind] !== "gpu"){ el.classList.add("hidden"); return; }
   el.classList.remove("hidden");
-  const i = gpu.info;
-  if(!i){ el.innerHTML = `<span class="hint">Prüfe Cloud-GPU …</span>`; loadGpuInfo().then(renderGpuBar); return; }
+  if(!gpu.list){ el.innerHTML = `<span class="hint">Prüfe Cloud-GPU …</span>`; loadGpuInfo().then(renderStudio); return; }
   if(!cloud.hw){ cloud.hw = []; api("/easy/cloud/hardware").then(j => { cloud.hw = j.items || []; renderGpuBar(); }); }
-  if(!i.exists){ el.innerHTML = ""; return; }
-  const hw = ((cloud.hw || []).find(h => h.name === (i.current || i.hardware)) || {});
-  const ST = { RUNNING: "läuft", PAUSED: "aus – startet automatisch beim Erstellen", SLEEPING: "aus – startet automatisch beim Erstellen", STOPPED: "aus – startet automatisch beim Erstellen", BUILDING: "wird eingerichtet", APP_STARTING: "startet", RUNNING_APP_STARTING: "startet", RUNNING_BUILDING: "wird aktualisiert" };
-  el.innerHTML = `<div class="row" style="flex-wrap:wrap;gap:8px"><span class="bdg rent">🚀 Cloud-GPU${hw.pretty ? " · " + esc(hw.pretty) : ""}${hw.per_hour ? " · " + usd(hw.per_hour) + "/Std." : ""}</span><span class="hint">${esc(ST[i.stage] || i.stage || "")}</span>
-    ${i.needs_update ? `<button class="btn" type="button" id="gpuUpd" style="font-size:12px;padding:4px 10px">⬆ Cloud-GPU auf ${esc(i.version)} aktualisieren</button>` : ""}
-    ${i.stage === "RUNNING" || /STARTING|BUILDING/.test(i.stage || "") ? `<button class="btn" type="button" id="gpuPause" style="font-size:12px;padding:4px 10px">⏸ Pausieren</button>` : ["PAUSED", "SLEEPING", "STOPPED"].includes(i.stage) ? `<button class="btn" type="button" id="gpuStart" style="font-size:12px;padding:4px 10px">▶ Starten</button>` : ""}
-    <button class="btn" type="button" id="gpuRef" style="font-size:12px;padding:4px 10px" title="Aktualisieren">↻</button>
+  if(!gpu.list.length){ el.innerHTML = ""; return; }
+  const i = gpuSel(), hw = hwOf(i), small = 'style="font-size:12px;padding:4px 10px"';
+  const busyOn = B => state.runs.filter(r => r.B === B).length + state.queue.filter(j => j.B === B).length;
+  const chipsHtml = gpu.list.map(e => {
+    const h = hwOf(e), n = busyOn(e.B);
+    return `<button class="chip ${e.slot === i.slot && !gpu.adding ? "act" : ""}" type="button" data-slot="${e.slot}">🚀 GPU ${e.slot}${h.pretty ? " · " + esc(h.pretty.replace(/^1x /, "")) : ""}<small><span style="color:${isOn(e.stage) ? "#4ade80" : "var(--muted)"}">●</span> ${esc(T(e.stage === "RUNNING" ? "läuft" : isOn(e.stage) ? "startet" : "aus"))}${n ? ` · ${n} ${esc(T(n === 1 ? "Auftrag" : "Aufträge"))}` : ""}</small></button>`;
+  }).join("") + `<button class="chip ${gpu.adding ? "act" : ""}" type="button" id="gpuAdd" title="${esc(T("Weitere Cloud-GPU mieten – sie arbeitet gleichzeitig mit den anderen."))}">＋ ${esc(T("Weitere GPU"))}<small>${esc(T("gleichzeitig arbeiten"))}</small></button>`;
+  el.innerHTML = `<div class="chips" id="gpuChips" style="margin-bottom:8px">${chipsHtml}</div>
+    ${gpu.adding ? "" : `<div class="row" style="flex-wrap:wrap;gap:8px"><span class="bdg rent">🚀 GPU ${i.slot}${hw.pretty ? " · " + esc(hw.pretty) : ""}${hw.per_hour ? " · " + usd(hw.per_hour) + "/Std." : ""}</span><span class="hint">${esc(STAGE_TXT[i.stage] || i.stage || "")}</span>
+    ${i.needs_update ? `<button class="btn" type="button" id="gpuUpd" ${small}>⬆ Cloud-GPU auf ${esc(i.version)} aktualisieren</button>` : ""}
+    ${isOn(i.stage) ? `<button class="btn" type="button" id="gpuPause" ${small}>⏸ Pausieren</button>` : ["PAUSED", "SLEEPING", "STOPPED"].includes(i.stage) ? `<button class="btn" type="button" id="gpuStart" ${small}>▶ Starten</button>` : ""}
+    <button class="btn" type="button" id="gpuRef" ${small} title="Aktualisieren">↻</button>
     <label class="row hint" style="gap:6px;color:var(--text);cursor:pointer" title="Sobald alle Videos in der Warteschlange fertig und abgeholt sind, wird die Cloud-GPU sofort pausiert – ohne die Wartezeit bis zum automatischen Ausschalten."><input type="checkbox" id="gpuAuto" ${store.get("gpuPauseAfter", false) ? "checked" : ""}> <span>☕ Pausieren, wenn die Warteschlange fertig ist</span></label></div>
-    <div class="row" id="gpuMoney" style="flex-wrap:wrap;gap:8px;margin-top:6px">${gpuMoneyHtml(hw)}</div>`;
+    <div class="row" id="gpuMoney" style="flex-wrap:wrap;gap:8px;margin-top:6px">${gpuMoneyHtml()}</div>`}`;
+  el.querySelectorAll("[data-slot]").forEach(b => b.onclick = () => pickGpu(+b.dataset.slot));
+  $("#gpuAdd").onclick = () => { gpu.adding = true; renderStudio(); };
+  if(gpu.adding) return;
   bindGpuMoney();
   if($("#gpuPause")) $("#gpuPause").onclick = () => rentedAction(i.id, "pause");
-  $("#gpuAuto").onchange = e => { store.set("gpuPauseAfter", e.target.checked); if(e.target.checked) maybeAutoPause(); };
   if($("#gpuStart")) $("#gpuStart").onclick = () => rentedAction(i.id, "start");
-  $("#gpuRef").onclick = async () => { gpu.info = null; renderGpuBar(); refreshGpuMoney(true); };
-  if($("#gpuUpd")) $("#gpuUpd").onclick = async () => { $("#gpuUpd").disabled = true; const r = await api("/easy/cloud/comfy/update", {}); if(r.error) toast("❌ " + esc(r.error), "err"); else toast("✅ " + esc(T("Wird aktualisiert – die Cloud-GPU richtet sich in einigen Minuten neu ein.")), "ok"); gpu.info = null; renderGpuBar(); };
+  $("#gpuAuto").onchange = e => { store.set("gpuPauseAfter", e.target.checked); if(e.target.checked) (gpu.list || []).forEach(g => maybeAutoPause(g.B)); };
+  $("#gpuRef").onclick = async () => { gpu.list = null; renderGpuBar(); refreshGpuMoney(true); };
+  if($("#gpuUpd")) $("#gpuUpd").onclick = async () => { $("#gpuUpd").disabled = true; const r = await api("/easy/cloud/comfy/update", { slot: i.slot }); if(r.error) toast("❌ " + esc(r.error), "err"); else toast("✅ " + esc(T("Wird aktualisiert – die Cloud-GPU richtet sich in einigen Minuten neu ein.")), "ok"); gpu.list = null; renderGpuBar(); };
 }
-// Guthaben direkt im Studio (Cloud-GPU)
-function gpuMoneyHtml(hw){
+// Guthaben direkt im Studio – mit den Kosten aller gerade laufenden GPUs
+function gpuMoneyHtml(){
   const a = cloud.acct;
   if(!a){ if(!gpu.acctLoading) refreshGpuMoney(false); return `<span class="hint">💰 Lese Guthaben …</span>`; }
   if(!a.token_set || a.error) return "";
   const w = cloud.wallet, us = a.usage, av = availableRaw();
+  const on = (gpu.list || []).filter(e => isOn(e.stage));
+  const rate = on.reduce((s, e) => s + (hwOf(e).per_hour || 0), 0);
+  const sel = gpuSel(), selRate = sel ? hwOf(sel).per_hour || 0 : 0;
   const parts = [];
   if(w && typeof w.balance === "number"){
     parts.push(`<span class="bdg pay">💰 <span>Guthaben</span> <b>${usd(av ? av.v : w.balance)}</b></span>`);
-    if(hw && hw.per_hour && av){
-      const hrs = av.v / hw.per_hour;
-      parts.push(av.v > 0.01 ? `<span class="hint"><span>reicht für</span> ≈ <b>${hrs >= 10 ? Math.floor(hrs) : hrs.toFixed(1).replace(".", ",")}</b> <span>Std. auf dieser GPU</span></span>`
-        : `<span class="msg warn" style="margin:0;padding:4px 10px">Kein Guthaben mehr – bei HuggingFace aufladen.</span>`);
+    const r = rate || selRate;
+    if(r && av){
+      const hrs = av.v / r, hs = `<b>${hrs >= 10 ? Math.floor(hrs) : hrs.toFixed(1).replace(".", ",")}</b>`;
+      if(av.v <= 0.01) parts.push(`<span class="msg warn" style="margin:0;padding:4px 10px">Kein Guthaben mehr – bei HuggingFace aufladen.</span>`);
+      else if(on.length > 1) parts.push(`<span class="hint"><span>${on.length} GPUs laufen:</span> <b>${usd(rate)}</b><span>/Std.</span> · <span>reicht für</span> ≈ ${hs} <span>Std.</span></span>`);
+      else parts.push(`<span class="hint"><span>reicht für</span> ≈ ${hs} <span>${on.length === 1 && on[0] !== sel ? `Std. (GPU ${on[0].slot} läuft)` : "Std. auf dieser GPU"}</span></span>`);
     }
   } else if(host && host.hfLogin) parts.push(`<button class="btn" type="button" id="gpuLogin" style="font-size:12px;padding:4px 10px">💰 Guthaben anzeigen (bei HuggingFace anmelden)</button>`);
   else parts.push(extLink(HFL.billing, "💰 Guthaben ansehen", "btn"));
@@ -1136,9 +1231,8 @@ function bindGpuMoney(){
   if($("#gpuLogin")) $("#gpuLogin").onclick = async () => { $("#gpuLogin").disabled = true; await host.hfLogin(); $("#gpuLogin").textContent = T("Lese Guthaben …"); cloud.wallet = await host.hfWallet(); drawGpuMoney(); };
 }
 function drawGpuMoney(){
-  const el = $("#gpuMoney"); if(!el || !gpu.info) return;
-  const i = gpu.info, hw = ((cloud.hw || []).find(h => h.name === (i.current || i.hardware)) || {});
-  el.innerHTML = gpuMoneyHtml(hw); bindGpuMoney();
+  const el = $("#gpuMoney"); if(!el) return;
+  el.innerHTML = gpuMoneyHtml(); bindGpuMoney();
 }
 async function refreshGpuMoney(force){
   if(gpu.acctLoading) return;
@@ -1147,23 +1241,26 @@ async function refreshGpuMoney(force){
   gpu.acctLoading = false;
   drawGpuMoney();
 }
-// alle 60 Sekunden auffrischen, solange das Studio im Cloud-GPU-Modus offen ist
-setInterval(() => {
+// alle 60 Sekunden auffrischen (Guthaben und Zustand der GPUs), solange das Studio im Cloud-GPU-Modus offen ist
+setInterval(async () => {
   if(document.hidden || !(state.tab === "video" || state.tab === "image") || state.compute[state.kind] !== "gpu" || !$("#gpuMoney")) return;
+  await loadGpuInfo(); renderGpuBar();
   refreshGpuMoney(true);
 }, 60000);
 // Pausieren / Starten direkt aus dem Studio
 async function rentedAction(id, act){
-  if(act === "pause" && (state.run || cloud.run) && !confirm(T("Gerade wird etwas erstellt. Trotzdem pausieren? Der Auftrag geht dabei verloren."))) return;
+  const e = (gpu.list || []).find(x => x.id === id), B = e ? e.B : null;
+  const mine = B ? state.runs.filter(r => r.B === B) : [];
+  if(act === "pause" && (mine.length || (B && state.queue.some(j => j.B === B))) && !confirm(T("Gerade wird etwas erstellt. Trotzdem pausieren? Der Auftrag geht dabei verloren."))) return;
   const r = await api("/easy/cloud/rented/" + act, { space: id });
   if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
   toast(act === "pause" ? "⏸ " + esc(T("Pausiert – kostet jetzt nichts mehr.")) : "▶ " + esc(T("Die GPU startet – das dauert ein paar Minuten. Im Studio siehst du den Fortschritt.")), "ok", 5000);
-  if(act === "pause" && state.run && state.run.B) fail("Abgebrochen.");
-  gpu.info = null; delete cloud.info[id];
-  setTimeout(() => { gpu.info = null; renderStudio(); }, 3000);
-  renderStudio();
+  if(act === "pause" && B){ state.queue = state.queue.filter(j => j.B !== B); mine.forEach(run => fail(run, "Abgebrochen.")); saveJobs(); renderQueue(); }
+  delete cloud.info[id];
+  await loadGpuInfo(); renderStudio();
+  setTimeout(async () => { await loadGpuInfo(); renderStudio(); }, 3000);
 }
-// Einrichtung der Cloud-GPU (einmalig)
+// Einrichtung einer (weiteren) Cloud-GPU
 async function gpuSetupCard(){
   const el = $("#noTool");
   el.classList.remove("hidden");
@@ -1171,8 +1268,11 @@ async function gpuSetupCard(){
   if(!cloud.hw) cloud.hw = (await api("/easy/cloud/hardware")).items || [];
   const a = cloud.acct || {}, hws = cloud.hw || [];
   const okMain = a.token_set && !a.error && a.token_role !== "read", okSpace = !!state.cfg.hf_space_token_set;
-  el.innerHTML = `<h3>🚀 Eigene Cloud-GPU einrichten</h3>
-    <p class="hint" style="margin:0 0 8px"><span>Easy Generate legt in deinem HuggingFace-Konto einen privaten Server mit ComfyUI an.</span> <span>Dort laufen deine Vorlagen genau wie zu Hause – nur auf einer großen Grafikkarte, ohne fremde Dienste und ohne Warteschlange.</span> <span>Bezahlt wird nur, solange er läuft.</span></p>
+  const n = (gpu.list || []).length, more = n > 0;
+  const used = new Set((gpu.list || []).map(x => x.slot)); let slot = 1; while(used.has(slot)) slot++;
+  el.innerHTML = `<h3>🚀 ${more ? T(`Weitere Cloud-GPU mieten (GPU ${slot})`) : T("Eigene Cloud-GPU einrichten")}</h3>
+    ${more ? `<p class="hint" style="margin:0 0 8px"><span>Jede Cloud-GPU arbeitet für sich – mit eigener Warteschlange, alle gleichzeitig.</span> <span>So kannst du z. B. auf GPU 1 Bild → Video und auf GPU ${slot} Text → Video erstellen.</span> <span>Jede kostet ihren Stundenpreis, solange sie läuft.</span></p>`
+      : `<p class="hint" style="margin:0 0 8px"><span>Easy Generate legt in deinem HuggingFace-Konto einen privaten Server mit ComfyUI an.</span> <span>Dort laufen deine Vorlagen genau wie zu Hause – nur auf einer großen Grafikkarte, ohne fremde Dienste und ohne Warteschlange.</span> <span>Bezahlt wird nur, solange er läuft.</span></p>`}
     ${!okMain ? `<div class="msg warn" style="margin-bottom:8px">Zuerst unter ☁️ Cloud dein HuggingFace-Konto mit einem Schlüssel vom Typ „Write“ verbinden. <button class="btn" type="button" onclick="showTab('cloud')">Zu ☁️ Cloud</button></div>` : ""}
     ${okMain && !okSpace ? `<div class="msg warn" style="margin-bottom:8px">Es fehlt noch der Space-Schlüssel (nur Lesen) – unter ☁️ Cloud → „Gratis-Kontingent deines Kontos nutzen“. <button class="btn" type="button" onclick="showTab('cloud')">Zu ☁️ Cloud</button></div>` : ""}
     <label class="l">Grafikkarte</label>
@@ -1181,19 +1281,20 @@ async function gpuSetupCard(){
     <select class="sel" id="gsSleep"><option value="900">15 Min. ohne Nutzung (empfohlen)</option><option value="1800">30 Min.</option><option value="3600">1 Std.</option></select>
     <label class="row hint" style="gap:8px;margin-top:10px;color:var(--text)"><input type="checkbox" id="gsPwr"> <span>☕ Nach dem ersten Einrichten automatisch pausieren (dann keine Kosten, bis du erstellst)</span></label>
     <p class="hint" style="margin:10px 0 0"><span>Beim ersten Mal wird der Server ca. 10 Minuten eingerichtet.</span> <span>Bei jedem Start lädt er die Modelle der gewählten Vorlage aus dem Netz (im Rechenzentrum sehr schnell).</span> <span>Für gesperrte Modelle bekommt der private Server deinen Haupt-Schlüssel als geheime Einstellung – dort läuft nur ComfyUI und Easy Generate, kein fremder Code.</span></p>
-    <div class="actions" style="margin-top:12px"><button class="btn pri" type="button" id="gsGo" ${okMain && okSpace ? "" : "disabled"}>🚀 Cloud-GPU einrichten</button></div>
+    <div class="actions" style="margin-top:12px"><button class="btn pri" type="button" id="gsGo" ${okMain && okSpace ? "" : "disabled"}>🚀 ${more ? T(`GPU ${slot} mieten`) : T("Cloud-GPU einrichten")}</button>${more ? `<button class="btn" type="button" id="gsBack">${esc(T("Zurück"))}</button>` : ""}</div>
     <div id="gsMsg2" style="margin-top:8px"></div>`;
   const def = hws.find(h => h.name === "rtx-pro-6000") || hws.find(h => /L40S/.test(h.pretty)) || hws[0];
   if(def) $("#gsHw").value = def.name;
+  if($("#gsBack")) $("#gsBack").onclick = () => { gpu.adding = false; renderStudio(); };
   $("#gsGo").onclick = async () => {
     const h = hws.find(x => x.name === $("#gsHw").value);
-    if(!confirm(T(`Cloud-GPU auf ${h ? h.pretty : $("#gsHw").value} einrichten?`) + "\n\n" + T(`Kosten: ${h ? usd(h.per_hour) : "?"} pro Stunde, solange der Space läuft. Ohne Nutzung schaltet er sich automatisch aus.`))) return;
+    if(!confirm(T(`Cloud-GPU auf ${h ? h.pretty : $("#gsHw").value} einrichten?`) + "\n\n" + T(`Kosten: ${h ? usd(h.per_hour) : "?"} pro Stunde, solange der Space läuft. Ohne Nutzung schaltet er sich automatisch aus.`) + (more ? "\n\n" + T(`Das ist deine GPU Nr. ${slot} – laufen mehrere gleichzeitig, zahlst du für jede.`) : ""))) return;
     $("#gsGo").disabled = true; $("#gsMsg2").innerHTML = `<span class="hint">Richte ein …</span>`;
-    const r = await api("/easy/cloud/comfy/create", { hardware: $("#gsHw").value, sleep: +$("#gsSleep").value, pause_when_ready: $("#gsPwr").checked });
+    const r = await api("/easy/cloud/comfy/create", { hardware: $("#gsHw").value, sleep: +$("#gsSleep").value, pause_when_ready: $("#gsPwr").checked, slot });
     if(r.error){ $("#gsGo").disabled = false; $("#gsMsg2").innerHTML = `<div class="msg err">${esc(cloudErr(r.error))}</div>`; return; }
-    gpu.info = null; await loadGpuInfo();
+    gpu.adding = false;
+    await loadGpuInfo(); pickGpu(r.slot || slot);
     toast("✅ " + esc(T("Die Cloud-GPU wird eingerichtet – das dauert beim ersten Mal ca. 10 Minuten.")), "ok", 8000);
-    renderStudio();
   };
 }
 
@@ -1632,7 +1733,7 @@ async function drawRented(){
     if(pw) pw.onchange = () => api("/easy/cloud/rented/pause_when_ready", { space: x.id, value: pw.checked });
     d.querySelectorAll("[data-a]").forEach(b => b.onclick = async () => {
       const act = b.dataset.a;
-      if(act === "use" && x.kind === "comfy"){ state.compute[state.kind === "image" ? "image" : "video"] = "gpu"; store.set("compute", state.compute); gpu.info = null; showTab(state.kind === "image" ? "image" : "video"); return; }
+      if(act === "use" && x.kind === "comfy"){ state.compute[state.kind === "image" ? "image" : "video"] = "gpu"; store.set("compute", state.compute); { const m = store.get("gpuSlot", {}); m._last = x.slot || 1; m[state.active[state.kind]] = x.slot || 1; store.set("gpuSlot", m); } gpu.list = null; showTab(state.kind === "image" ? "image" : "video"); return; }
       if(act === "use"){ const k = /image|flux|qwen-image|z-image|sdxl|klein/i.test(x.from || x.id) ? "image" : "video"; useCloud(k, { mode: "space", id: x.id, title: x.id.split("/").pop(), rented: true, per_hour: x.per_hour }); return; }
       if(act === "delete" && !confirm(T(`„${x.id}“ endgültig löschen?`) + "\n\n" + T("Er kostet danach nichts mehr; zum erneuten Nutzen musst du ihn neu mieten."))) return;
       let body = { space: x.id };
@@ -2167,7 +2268,7 @@ $("#galReload").onclick = loadGallery;
 
 /* ================= Modelle ================= */
 async function loadCatalog(silent){
-  if(!gpu.info) loadGpuInfo().then(() => { if(state.tab === "models") renderCatalog(); });
+  if(!gpu.list) loadGpuInfo().then(() => { if(state.tab === "models") renderCatalog(); });
   const j = await api("/easy/catalog");
   state.catalog = j.items || [];
   if(!silent || state.tab === "models") renderCatalog();
@@ -2176,7 +2277,7 @@ function recommend(k){ return state.catalog.filter(t => t.kind === k && !t.tool)
 function dlItemsFor(name){ return (dlState.items || []).filter(x => x.template === name); }
 function renderCatalog(){
   chips($("#mKind"), [["video", { n: "🎬 Video" }], ["image", { n: "🖼️ Bild" }]], state.mKind, k => { state.mKind = k; renderCatalog(); });
-  const hasGpu = gpu.info && gpu.info.exists;
+  const hasGpu = !!(gpu.list && gpu.list.length);
   $("#mTarget").classList.toggle("hidden", !hasGpu);
   if(!hasGpu) state.instTarget = "local";
   else chips($("#mTargetChips"), [["local", { n: "🖥️ Für meinen PC", sub: "lädt die Dateien herunter" }], ["gpu", { n: "🚀 Nur für die Cloud-GPU", sub: "ohne Download auf den PC" }]], state.instTarget || "local", t => { state.instTarget = t; renderCatalog(); });
