@@ -609,6 +609,10 @@
     ["Space nicht gefunden.", "Space not found.", "Space не найден."],
     ["Gemietete Spaces sind privat. Damit Easy Generate sie benutzen darf, braucht es den Space-Schlüssel mit Leserecht.", "Rented Spaces are private. For Easy Generate to use them, it needs the Space token with read access.", "Арендованные Spaces приватны. Чтобы Easy Generate мог их использовать, нужен токен для Spaces с правом чтения."],
     ["→ ☁️ Cloud → „Gratis-Kontingent deines Kontos nutzen“ → Schlüssel anlegen (mit dem Haken „Read access to contents of all repos under your personal namespace“).", "→ ☁️ Cloud → “Use your account's free quota” → create the token (with the box “Read access to contents of all repos under your personal namespace” ticked).", "→ ☁️ Облако → «Использовать бесплатную квоту аккаунта» → создай токен (с галочкой «Read access to contents of all repos under your personal namespace»)."],
+    ["✓ Bei HuggingFace angemeldet.", "✓ Signed in to HuggingFace.", "✓ Вход в HuggingFace выполнен."],
+    ["Auf deiner Abrechnungsseite wurde kein Prepaid-Guthaben gefunden – vermutlich wurde noch nichts aufgeladen.", "No prepaid credit was found on your billing page – probably nothing has been topped up yet.", "На странице оплаты не найден предоплаченный баланс – вероятно, ещё ничего не пополнено."],
+    ["Abrechnung ansehen", "View billing", "Открыть оплату"], ["Lese Guthaben …", "Reading credit …", "Читаю баланс …"],
+    ["Das Guthaben zeigt HuggingFace nur nach Anmeldung an.", "HuggingFace only shows your credit after signing in.", "HuggingFace показывает баланс только после входа."],
     // Galerie & Speicherort
     ["Deine Videos und Bilder – sortiert nach Modell", "Your videos and images – sorted by model", "Твои видео и изображения – по моделям"],
     ["Ändern", "Change", "Изменить"], ["📂 Gespeichert in:", "📂 Stored in:", "📂 Хранится в:"], ["Gespeichert in:", "Stored in:", "Хранится в:"], ["Ordner öffnen", "Open folder", "Открыть папку"],
@@ -665,6 +669,7 @@
     [/^Du lädst jedes Ergebnis selbst herunter\. Was nicht heruntergeladen wird, löscht Easy Generate nach (\d+) Std\.$/, (m, h) => L(`You download each result yourself. Anything not downloaded is deleted by Easy Generate after ${h} h.`, `Ты сам скачиваешь каждый результат. Всё, что не скачано, Easy Generate удаляет через ${h} ч.`)],
     [/^Bisherige Ergebnisse \((\d+) Dateien, (.+)\) in den neuen Ordner verschieben$/, (m, n, g) => L(`Move previous results (${n} files, ${g}) to the new folder`, `Переместить прежние результаты (файлов: ${n}, ${g}) в новую папку`)],
     [/^✅ (\d+) Dateien verschoben\.$/, (m, n) => L(`✅ ${n} files moved.`, `✅ Перемещено файлов: ${n}.`)],
+    [/^HuggingFace war nicht erreichbar \((.+)\)\. Das Guthaben zeigt HuggingFace nur nach Anmeldung an\.$/, (m, e) => L(`HuggingFace was not reachable (${e}). HuggingFace only shows your credit after signing in.`, `HuggingFace недоступен (${e}). HuggingFace показывает баланс только после входа.`)],
     [/^Ordner nicht beschreibbar: (.+)$/, (m, e) => L("Folder not writable: ", "Нет доступа на запись в папку: ") + e],
     [/^Hinweis: Ohne Galerie wird das Ergebnis nach (\d+) Std\. gelöscht – jetzt herunterladen\.$/, (m, h) => L(`Note: without a gallery, the result is deleted after ${h} h – download it now.`, `Внимание: без галереи результат удаляется через ${h} ч – скачай его сейчас.`)],
     [/^· Lüfter (\d+) U\/min$/, (m, n) => L(`· fan ${n} rpm`, `· вентилятор ${n} об/мин`)],

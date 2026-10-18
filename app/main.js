@@ -393,7 +393,8 @@ function parseWallet(html) {
   let m;
   const visit = (o, depth) => {
     if (!o || typeof o !== "object" || depth > 8) return;
-    if (o.entity && typeof o.entity === "object" && typeof o.entity.currentBalanceUsd === "number" && (o.entity.type || "user") === "user") out.balance = o.entity.currentBalanceUsd;
+    if (o.entity && typeof o.entity === "object" && o.entity.currentBalanceUsd != null && !isNaN(+o.entity.currentBalanceUsd) && (o.entity.type || "user") === "user") out.balance = +o.entity.currentBalanceUsd;
+    if (out.balance == null && o.currentBalanceUsd != null && !isNaN(+o.currentBalanceUsd)) out.balance = +o.currentBalanceUsd;
     if (out.balance == null && typeof o.invoiceCreditsCents === "number") out.balance = o.invoiceCreditsCents / 100;
     for (const k of ["includedNanoUsd", "usedNanoUsd", "limitNanoUsd"]) if (typeof o[k] === "number" && out[k] == null) out[k] = o[k];
     for (const v of Object.values(o)) if (v && typeof v === "object") visit(v, depth + 1);
@@ -401,14 +402,51 @@ function parseWallet(html) {
   while ((m = re.exec(html))) { try { visit(JSON.parse(decodeEntities(m[1] != null ? m[1] : m[2])), 0); } catch (e) {} }
   return out;
 }
+// Liest die Abrechnungsseite in einem unsichtbaren Fenster mit der HuggingFace-Anmeldung
+// (genau wie ein normaler Browser – mit Cookies und nachgeladenen Inhalten).
+function loadBillingPage() {
+  return new Promise(resolve => {
+    const w = new BrowserWindow({ show: false, width: 1200, height: 900, webPreferences: { partition: HF_PART, contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    let done = false;
+    const finish = v => { if (done) return; done = true; clearTimeout(t); try { w.destroy(); } catch (e) {} resolve(v); };
+    const t = setTimeout(() => finish({ error: "timeout" }), 30000);
+    w.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    w.webContents.on("did-fail-load", (e, code, desc, url, main) => { if (main) finish({ error: desc || String(code) }); });
+    w.webContents.on("did-finish-load", async () => {
+      const url = w.webContents.getURL();
+      if (!isHF(url) || /^\/(login|join)/.test(new URL(url).pathname)) return finish({ login: true });
+      // kurz warten, falls Teile per JavaScript nachgeladen werden
+      for (let i = 0; i < 6; i++) {
+        let r = null;
+        try {
+          r = await w.webContents.executeJavaScript(`(() => ({
+            props: Array.from(document.querySelectorAll("[data-props]")).map(e => e.getAttribute("data-props")),
+            text: (document.body && document.body.innerText || "").slice(0, 20000)
+          }))()`);
+        } catch (e) {}
+        if (r) {
+          const wl = parseWallet(r.props.map(x => `<div data-props='${x.replace(/'/g, "&#39;")}'></div>`).join(""));
+          if (wl.balance == null) {   // Notlösung: sichtbaren Text lesen („… Credits … $12.34“)
+            const m = r.text.match(/(?:credit|guthaben|balance)[^$]{0,80}\$\s?([\d,]+(?:\.\d+)?)/i) || r.text.match(/\$\s?([\d,]+(?:\.\d+)?)[^\n]{0,40}(?:credit|balance)/i);
+            if (m) wl.balance = parseFloat(m[1].replace(/,/g, "")), wl.fromText = true;
+          }
+          if (wl.balance != null || i === 5) {
+            try { fs.writeFileSync(path.join(app.getPath("userData"), "hf_billing_debug.txt"), JSON.stringify({ url, keys: r.props.map(x => { try { return Object.keys(JSON.parse(x)); } catch (e) { return "?"; } }), text: r.text.slice(0, 3000) }, null, 1)); } catch (e) {}
+            return finish({ ...wl, loggedIn: true });
+          }
+        }
+        await sleep(1000);
+      }
+      finish({ loggedIn: true });
+    });
+    w.loadURL("https://huggingface.co/settings/billing");
+  });
+}
 async function hfWallet() {
   try {
-    const ses = session.fromPartition(HF_PART);
-    const r = await ses.fetch("https://huggingface.co/settings/billing", { headers: { Accept: "text/html" } });
-    if (!r.ok || !isHF(r.url) || /\/login/.test(new URL(r.url).pathname)) return { login: true };
-    const w = parseWallet(await r.text());
-    if (w.balance == null) return { login: !w.includedNanoUsd, unknown: true, ...w };
-    return { ...w, at: Date.now() };
+    const r = await loadBillingPage();
+    if (r.balance != null) return { ...r, at: Date.now() };
+    return r;   // {login:true} = nicht angemeldet, {loggedIn:true} ohne balance = angemeldet, aber Guthaben nicht lesbar
   } catch (e) { return { error: String(e.message || e) }; }
 }
 function hfLogin() {

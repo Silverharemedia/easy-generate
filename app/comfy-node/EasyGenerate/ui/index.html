@@ -1007,7 +1007,8 @@ function renderAccount(){
   const u = a.user || {}, w = cloud.wallet, us = a.usage, av = available();
   let wal;
   if(w && typeof w.balance === "number") wal = `<div class="money">${usd(w.balance)}</div><div class="hint">Guthaben (Prepaid-Credits) bei HuggingFace</div>`;
-  else if(host && host.hfLogin) wal = `<div class="hint" style="margin-bottom:6px">Das Guthaben zeigt HuggingFace nur nach Anmeldung an.</div><button class="btn pri" type="button" id="clLogin">Bei HuggingFace anmelden, um das Guthaben zu sehen</button>`;
+  else if(w && w.loggedIn) wal = `<div class="msg ok" style="margin-bottom:6px">✓ Bei HuggingFace angemeldet.</div><div class="hint">Auf deiner Abrechnungsseite wurde kein Prepaid-Guthaben gefunden – vermutlich wurde noch nichts aufgeladen. ${extLink(HFL.billing, "Abrechnung ansehen")}</div>`;
+  else if(host && host.hfLogin) wal = `<div class="hint" style="margin-bottom:6px">${w && w.error ? "HuggingFace war nicht erreichbar (" + esc(w.error) + "). " : ""}Das Guthaben zeigt HuggingFace nur nach Anmeldung an.</div><button class="btn pri" type="button" id="clLogin">Bei HuggingFace anmelden, um das Guthaben zu sehen</button>`;
   else wal = `<div class="hint">Guthaben ansehen: ${extLink(HFL.billing, "huggingface.co/settings/billing")}</div>`;
   const period = us && us.period && us.period.periodEnd ? new Date(us.period.periodEnd).toLocaleDateString() : "";
   const catNames = { Endpoints: "Inference Endpoints", Spaces: "Gemietete Spaces (GPU)", "Inference Providers": "Pro Video / Bild (Anbieter)", Jobs: "Jobs", ZeroGPU: "ZeroGPU über Kontingent" };
@@ -1028,7 +1029,7 @@ function renderAccount(){
       ${extLink(HFL.billing, "💳 Guthaben aufladen", "btn pri")}
       ${!u.isPro ? extLink(HFL.pro, "PRO holen ($9/Monat)", "btn") : ""}
       ${extLink(HFL.usage, "Verbrauch im Detail", "btn")}
-      ${w && typeof w.balance === "number" && host && host.hfLogout ? `<button class="btn" type="button" id="clLogout">Abmelden</button>` : ""}
+      ${w && (typeof w.balance === "number" || w.loggedIn) && host && host.hfLogout ? `<button class="btn" type="button" id="clLogout">Abmelden</button>` : ""}
       <button class="btn" type="button" id="clTokChange">Schlüssel ändern</button>
     </div>
     <div id="clTokBox" class="hidden" style="margin-top:10px"><div class="row"><input type="password" id="clTok2" placeholder="hf_…" autocomplete="off"><button class="btn pri" type="button" id="clTokSave2">Speichern</button></div><div id="clTokMsg2" style="margin-top:6px"></div></div>
@@ -1047,7 +1048,7 @@ function renderAccount(){
   $("#clTokChange").onclick = () => $("#clTokBox").classList.toggle("hidden");
   $("#clTokSave2").onclick = async () => { if(await saveToken("hf_token", $("#clTok2").value, $("#clTokMsg2"))){ await loadAccount(true); renderCloud(); } };
   $("#clSTokSave").onclick = async () => { if(await saveToken("hf_space_token", $("#clSTok").value, $("#clSTokMsg"))){ $("#clSTok").value = ""; await loadAccount(true); renderCloud(); } };
-  if($("#clLogin")) $("#clLogin").onclick = async () => { const ok = await host.hfLogin(); if(ok){ cloud.wallet = await host.hfWallet(); renderCloud(); } };
+  if($("#clLogin")) $("#clLogin").onclick = async () => { const ok = await host.hfLogin(); $("#clLogin").disabled = true; $("#clLogin").textContent = "Lese Guthaben …"; cloud.wallet = await host.hfWallet(); renderCloud(); };
   if($("#clLogout")) $("#clLogout").onclick = async () => { await host.hfLogout(); cloud.wallet = null; renderCloud(); };
 }
 function renderReach(){
