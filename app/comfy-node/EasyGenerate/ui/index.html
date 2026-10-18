@@ -919,7 +919,7 @@ const usd = v => v == null || isNaN(v) ? "–" : "$" + (v !== 0 && Math.abs(v) <
 const HFL = {
   billing: "https://huggingface.co/settings/billing", join: "https://huggingface.co/join", pro: "https://huggingface.co/subscribe/pro",
   tokWrite: "https://huggingface.co/settings/tokens/new?tokenType=write&description=Easy%20Generate",
-  tokSpace: "https://huggingface.co/settings/tokens/new?tokenType=fineGrained&description=Easy%20Generate%20Spaces",
+  tokSpace: "https://huggingface.co/settings/tokens/new?tokenType=fineGrained&description=Easy%20Generate%20Spaces&ownUserPermissions=repo.content.read",
   usage: "https://huggingface.co/settings/inference-providers/overview", spaces: "https://huggingface.co/spaces"
 };
 const TASKN = { t2v: "Text → Video", i2v: "Bild → Video", t2i: "Text → Bild", i2i: "Bild bearbeiten" };
@@ -1036,12 +1036,13 @@ function renderAccount(){
     <details style="margin-top:14px" ${!st ? "" : ""}><summary>🆓 Gratis-Kontingent deines Kontos nutzen ${st && st.ok ? "✓" : ""}</summary>
       <p class="hint" style="margin:8px 0"><span>Gratis-Spaces sind Programme anderer Leute. Deshalb bekommen sie nie deinen Haupt-Schlüssel, sondern einen eigenen Schlüssel ohne Rechte.</span> <span>Der zeigt HuggingFace nur, wer du bist, damit dein Tageskontingent (${a.zerogpu_min || 5} Min. GPU) gilt.</span> <span>Ohne diesen Schlüssel funktionieren die Spaces trotzdem, aber mit kleinerem Gast-Kontingent.</span></p>
       <ol class="steps">
-        <li>${extLink(HFL.tokSpace, "Schlüssel „Fein abgestuft“ anlegen")} <span>– keine Haken setzen (für gemietete Spaces nur: „Read access to contents of all repos under your personal namespace“), dann „Create token“.</span></li>
+        <li>${extLink(HFL.tokSpace, "Schlüssel „Fein abgestuft“ anlegen")} <span>– der Haken „Read access to contents of all repos under your personal namespace“ ist schon gesetzt (nötig für gemietete GPUs). Sonst nichts anhaken, dann unten „Create token“.</span></li>
         <li>Hier einfügen:</li>
       </ol>
       <div class="row"><input type="password" id="clSTok" placeholder="${state.cfg.hf_space_token_set ? "gespeichert ✓ – zum Ersetzen neu einfügen" : "hf_…"}" autocomplete="off"><button class="btn" type="button" id="clSTokSave">Speichern</button></div>
       ${st && st.ok && st.role === "write" ? `<div class="msg err" style="margin-top:6px">Dieser Space-Schlüssel hat Schreibrechte – bitte einen ohne Rechte anlegen!</div>` : ""}
       ${st && st.ok === false ? `<div class="msg err" style="margin-top:6px">Der Space-Schlüssel wurde abgelehnt.</div>` : ""}
+      ${st && st.ok && st.read_own === false ? `<div class="msg warn" style="margin-top:6px">Diesem Space-Schlüssel fehlt das Leserecht für deine eigenen Repos – für gemietete GPUs bitte neu anlegen (Link oben, der Haken ist dann schon gesetzt).</div>` : ""}
       <div id="clSTokMsg" style="margin-top:6px"></div>
     </details>`;
   $("#clRefresh").onclick = async () => { $("#clRefresh").disabled = true; await loadAccount(true); renderCloud(); };
@@ -1418,8 +1419,10 @@ async function renderSpaceForm(s){
   if(!info){
     $("#cSlots").innerHTML = `<div class="hint">Lese die Einstellungen des Space … (beim ersten Mal einige Sekunden)</div>`;
     ["#cPromptLbl", "#cPrompt", "#cAi", "#cDurBox", "#cEpBox"].forEach(x => $(x).classList.add("hidden"));
-    info = await spaceInfo(s.id);
+    if(s.rented){ state.cfg = await api("/easy/config"); }
+    info = s.rented && !state.cfg.hf_space_token_set ? { error: "AUTH" } : await spaceInfo(s.id);
     if(curCloud() !== s || state.compute[k] !== "cloud") return;
+    if(info.error && s.rented && /^(AUTH|FORBIDDEN)|401|403|Repository Not Found/.test(String(info.error))){ rentedTokenHelp(s); return; }
     if(info.error){
       $("#cSlots").innerHTML = `<div class="msg err">${esc(cloudErr(info.error))}</div><div class="actions" style="margin-top:8px"><button class="btn" type="button" id="cRetry">Erneut versuchen</button></div>`;
       $("#cRetry").onclick = async () => { delete cloud.info[s.id]; await spaceInfo(s.id, true); renderCloudStudio(); };
@@ -1468,6 +1471,27 @@ async function renderSpaceForm(s){
     else { w.innerHTML = `<label class="l">${esc(f.label)}${f.min != null ? ` <span class="hint">(${f.min}–${f.max})</span>` : ""}</label><input type="${f.kind === "number" ? "number" : "text"}">`; inp = w.querySelector("input"); if(f.min != null){ inp.min = f.min; inp.max = f.max; } if(f.kind === "number") inp.step = f.int ? 1 : "any"; inp.value = cur ?? ""; inp.oninput = () => { vals[f.i] = inp.value === "" ? null : (f.kind === "number" ? +inp.value : inp.value); saveVals(); }; }
     box.appendChild(w);
   }
+}
+// Gemietete Spaces sind privat: Easy Generate braucht dafür den Space-Schlüssel mit Leserecht.
+function rentedTokenHelp(s){
+  $("#cSlots").innerHTML = `<div class="card" style="background:var(--panel2)">
+    <h3 style="margin-top:0">🔑 Noch ein Schritt für deine gemietete GPU</h3>
+    <p class="hint" style="margin:0 0 8px"><span>Deine gemietete GPU ist privat – nur du darfst sie benutzen.</span> <span>Damit Easy Generate auf sie zugreifen darf, braucht es einen zweiten Schlüssel, der nur lesen darf.</span> <span>Der Haupt-Schlüssel wird aus Sicherheitsgründen nie an Spaces geschickt.</span></p>
+    <ol class="steps">
+      <li>${extLink(HFL.tokSpace, "Schlüssel anlegen")} <span>– der nötige Haken ist schon gesetzt, einfach unten „Create token“ klicken.</span></li>
+      <li>Hier einfügen:</li>
+    </ol>
+    <div class="row"><input type="password" id="rtTok" placeholder="hf_…" autocomplete="off"><button class="btn pri" type="button" id="rtSave">Speichern & verbinden</button></div>
+    <div id="rtMsg" style="margin-top:8px"></div></div>`;
+  ["#cPromptLbl", "#cPrompt", "#cAi", "#cDurBox", "#cEpBox"].forEach(x => $(x).classList.add("hidden"));
+  $("#rtSave").onclick = async () => {
+    if(!(await saveToken("hf_space_token", $("#rtTok").value, $("#rtMsg")))) return;
+    $("#rtMsg").innerHTML = `<span class="hint">Verbinde …</span>`;
+    delete cloud.info[s.id];
+    const r = await spaceInfo(s.id, true);
+    if(r.error){ $("#rtMsg").innerHTML = `<div class="msg err">${esc(cloudErr(r.error))}</div><p class="hint">Startet die GPU gerade noch? Das kann beim ersten Mal einige Minuten dauern – dann einfach nochmal speichern.</p>`; return; }
+    cloud.acct = null; renderCloudStudio();
+  };
 }
 function renderCloudEta(){
   const h = etaHist[cloudKey(curCloud())];

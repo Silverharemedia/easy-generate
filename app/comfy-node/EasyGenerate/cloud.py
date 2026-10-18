@@ -203,7 +203,14 @@ async def _account():
                 async with s.get(HF + "/api/whoami-v2", headers={"Authorization": "Bearer " + st_tok}) as r:
                     sj = await r.json() if r.status == 200 else {}
             at = (sj.get("auth") or {}).get("accessToken") or {}
-            out["space_token"] = {"ok": bool(sj), "role": at.get("role"), "same_user": sj.get("name") == out.get("user", {}).get("name")}
+            uname = out.get("user", {}).get("name")
+            read_own = at.get("role") in ("read", "write")
+            fg = at.get("fineGrained") or {}
+            for sc in fg.get("scoped") or []:
+                ent = sc.get("entity") or {}
+                if ent.get("name") == uname and "repo.content.read" in (sc.get("permissions") or []):
+                    read_own = True
+            out["space_token"] = {"ok": bool(sj), "role": at.get("role"), "same_user": sj.get("name") == uname, "read_own": read_own}
         except Exception:
             out["space_token"] = {"ok": None}
     out["included"] = 2.0 if out.get("user", {}).get("isPro") else 0.0
