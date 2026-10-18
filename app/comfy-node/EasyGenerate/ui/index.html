@@ -1604,6 +1604,8 @@ async function cloudGenerate(){
       const info = cloud.info[s.id]; if(!info){ showMsg("warn", "Die Einstellungen des Space werden noch gelesen …"); return; }
       const { ep } = pickEndpoint(info, s.id);
       const vk = s.id + ep.api, vals = Object.assign({}, cloud.vals[vk] || {}), files = {};
+      for(const k of Object.keys(vals)) if(vals[k] === "" || vals[k] == null) delete vals[k];
+      for(const f of ep.fields) if(f.kind === "choice" && f.choices && vals[f.i] == null && f.default != null) vals[f.i] = f.default;
       const pf = ep.fields.find(f => f.role === "prompt") || ep.fields.find(f => f.kind === "text" && f.role !== "negative");
       if(pf){ if(!prompt && pf.required){ showMsg("warn", "Bitte beschreibe zuerst, was entstehen soll."); return; } if(prompt) vals[pf.i] = prompt; }
       const nf = ep.fields.find(f => f.role === "negative"); if(nf && $("#cNeg").value.trim()) vals[nf.i] = $("#cNeg").value.trim();
@@ -1648,12 +1650,14 @@ async function cloudPoll(){
     txt = `${st.progress.desc ? st.progress.desc + ": " : "Schritt "}${st.progress.index} von ${st.progress.length}`;
   } else if(st.progress && st.progress.progress != null){ pct = st.progress.progress * 100; }
   else if(st.code === "RETRY") txt = "Anbieter kennt nicht alle Einstellungen – versuche es mit Standardwerten …";
+  else if(st.code === "RETRY_CHOICE") txt = "Der Space erwartet bei einer Einstellung feste Werte – nehme den ersten passenden und versuche es nochmal …";
   else if(run.sel.mode === "provider") txt = "Der Anbieter erstellt dein Ergebnis …";
   if(pct == null && run.est) pct = Math.min(95, el / run.est * 100);
   $("#progTxt").textContent = txt;
   $("#bar").style.width = Math.max(2, Math.min(99, pct || 3)) + "%";
   $("#etaRun").textContent = left != null ? (left > 5 ? `· noch ca. ${fmtDur(left)}` : "· gleich fertig …") : "";
   if(j.state === "done"){
+    if(j.learned && run.sel.mode === "space"){ delete cloud.info[run.sel.id]; spaceInfo(run.sel.id, true).then(() => { if(curCloud() === run.sel) renderCloudStudio(); }); }
     recordRun(cloudKey(run.sel), 1, el);
     cloud.run = null; $("#progBox").classList.add("hidden"); updateGo();
     if(state.tab === "video" || state.tab === "image") renderCloudEta();

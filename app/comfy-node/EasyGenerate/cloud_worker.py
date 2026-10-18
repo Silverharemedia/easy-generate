@@ -275,8 +275,34 @@ def op_space(job):
         elif f["kind"] == "bool":
             v = bool(v) if not isinstance(v, str) else v.lower() in ("1", "true", "yes", "on")
         args.append(v)
-    emit(type="status", stage="submit")
-    j = c.submit(*args, api_name=job["api"])
+    learned = {}
+    res = None
+    for attempt in range(4):
+        emit(type="status", stage="submit")
+        j = c.submit(*args, api_name=job["api"])
+        watch_job(j)
+        try:
+            res = j.result()
+            break
+        except Exception as e:
+            fix = choice_fix(str(e), ep["fields"], args)
+            if not fix or attempt == 3:
+                raise
+            i, choices, pick = fix                 # Space kennt nur bestimmte Werte -> merken und gueltigen nehmen
+            learned[str(i)] = choices
+            args[i] = pick
+            emit(type="status", stage="run", code="RETRY_CHOICE", field=i, choices=choices)
+    res = j.result()
+    paths = []
+    collect_files(res, paths)
+    saved = save_outputs(paths, job["outdir"], "cloud")
+    if not saved:
+        raise ValueError("NO_OUTPUT|Der Space hat keine Datei zurueckgegeben: " + str(res)[:300])
+    emit(type="result", files=saved, learned=learned)
+    c.close()
+
+
+def watch_job(j):
     last = None
     while not j.done():
         try:
@@ -297,17 +323,30 @@ def op_space(job):
         except Exception:
             pass
         time.sleep(0.7)
-    res = j.result()
-    paths = []
-    collect_files(res, paths)
-    saved = save_outputs(paths, job["outdir"], "cloud")
-    if not saved:
-        raise ValueError("NO_OUTPUT|Der Space hat keine Datei zurueckgegeben: " + str(res)[:300])
-    emit(type="result", files=saved)
-    c.close()
 
 
-def op_provider(job):
+CHOICE_RX = re.compile(r"Value:\s*(.*?)\s*is not in the list of choices:\s*(\[.*\])", re.S)
+
+
+def choice_fix(msg, fields, args):
+    """Gradio meldet „Value: X is not in the list of choices: [...]“ -> Feld finden, Auswahl merken, ersten Wert nehmen."""
+    m = CHOICE_RX.search(msg)
+    if not m:
+        return None
+    import ast
+    try:
+        choices = [str(x) for x in ast.literal_eval(m.group(2))]
+    except Exception:
+        return None
+    if not choices:
+        return None
+    bad = m.group(1).strip()
+    cand = [f for f in fields if f["kind"] in ("text", "choice") and str(args[f["i"]] if args[f["i"]] is not None else "").strip() == bad]
+    if not cand:
+        return None
+    f = cand[0]
+    return f["i"], choices, choices[0]
+
     from huggingface_hub import InferenceClient
     token = job.get("token")
     if not token:

@@ -514,6 +514,14 @@ async def cloud_space_info(request):
     r = await run_worker({"op": "info", "space": sid, "token": space_token()}, timeout=180)
     if r.get("type") != "result":
         return web.json_response({"error": r.get("error"), "meta": meta}, status=502)
+    learned = cstate().get("choices", {})
+    for ep in r["endpoints"]:
+        for i, ch in (learned.get(sid + ep["api"]) or {}).items():
+            for f in ep["fields"]:
+                if str(f["i"]) == str(i) and ch:
+                    f["kind"], f["choices"] = "choice", ch
+                    if f.get("default") in (None, "") or str(f.get("default")) not in ch:
+                        f["default"] = ch[0]
     out = {"space": sid, "meta": meta, "endpoints": r["endpoints"]}
     CACHE[key] = (time.time(), out)
     return web.json_response(out)
@@ -577,6 +585,13 @@ async def _run_job(j, spec):
                 ref = None
             files.append(dict(ref, name=os.path.basename(t)) if ref else {"filename": f, "subfolder": SUB, "type": "output"})
         j["files"] = files
+        if r.get("learned") and spec.get("op") == "space":
+            st = cstate()
+            ch = st.setdefault("choices", {}).setdefault(spec["space"] + spec["api"], {})
+            ch.update(r["learned"])
+            save_cstate(st)
+            CACHE.pop("info:" + spec["space"], None)
+            j["learned"] = r["learned"]
         j["state"] = "done"
         if spec.get("op") == "provider":
             asyncio.ensure_future(_learn_cost(spec["model"], before, j.get("units", 0)))
