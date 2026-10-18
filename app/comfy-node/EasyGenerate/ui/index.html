@@ -764,7 +764,8 @@ async function generate(){
     const names = {};
     for(const im of info.images) names[im.id] = await uploadImage(state.images[im.id], B);
     const wf = buildPrompt(names, seed);
-    if(B) openRemoteWS();
+    let rpSeq = null;
+    if(B){ openRemoteWS(); try{ rpSeq = (await api(B + "/easy/progress?since=999999999")).seq || 0; }catch(e){} }
     const r = await fetch(B + "/prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: wf, client_id: cid }) });
     const j = await r.json().catch(() => ({}));
     if(!r.ok || j.error){
@@ -772,7 +773,7 @@ async function generate(){
       for(const ne of Object.values(j.node_errors || {})) for(const e of ne.errors || []) lines.push(`${ne.class_type}: ${e.message}${e.details ? " – " + e.details : ""}`);
       showMsg("err", friendly(lines.join("\n"))); return;
     }
-    state.run = { id: j.prompt_id, key, kind: k, B, start: Date.now(), total: Object.keys(wf).length, done: new Set(), step: 0, max: 0, finished: false, wf, units: workUnits(), est: B ? null : estimate() };
+    state.run = { id: j.prompt_id, key, kind: k, B, rpSeq, start: Date.now(), total: Object.keys(wf).length, done: new Set(), step: 0, max: 0, finished: false, wf, units: workUnits(), est: estimate() };
     $("#progBox").classList.remove("hidden"); $("#progTxt").textContent = "In der Warteschlange …"; $("#bar").style.width = "2%";
     tick(); updateGo();
   }catch(e){ $("#progBox").classList.add("hidden"); updateGo(); showMsg("err", friendly(gpuErr(String(e.message || e)))); }
@@ -782,8 +783,8 @@ function tick(){
   $("#timeTxt").textContent = fmtTime((Date.now() - run.start) / 1000);
   $("#etaRun").textContent = runEtaText(run);
   run.timer = setTimeout(tick, 1000);
-  const sock = run.B ? rws : ws;
-  if(!sock || sock.readyState !== 1){ if(!run.poll || Date.now() - run.poll > 3000){ run.poll = Date.now(); pollDone(); } }
+  if(run.B){ remoteProgress(run); return; }
+  if(!ws || ws.readyState !== 1){ if(!run.poll || Date.now() - run.poll > 3000){ run.poll = Date.now(); pollDone(); } }
 }
 function updateBar(){
   const run = state.run; if(!run) return;
@@ -828,7 +829,7 @@ async function finish(){
     if(!files.length) await new Promise(r => setTimeout(r, 800));
   }
   const secs = (Date.now() - run.start) / 1000;
-  recordRun(run.key, run.units, secs);
+  recordRun((run.B ? "gpu:" : "") + run.key, run.units, secs);
   endRun();
   if(state.tab === "video" || state.tab === "image") renderEta();
   if(!files.length){ showMsg("warn", "Fertig, aber keine Ausgabe gefunden. Schau in den Ausgabe-Ordner."); return; }
@@ -904,6 +905,22 @@ function openRemoteWS(){
     rws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/easy/remote/ws?clientId=" + cid);
     rws.onmessage = e => { if(typeof e.data === "string"){ try{ const m = JSON.parse(e.data); if(m.type !== "eg_remote_error") onWS(m); }catch(err){} } };
   }catch(e){ rws = null; }
+}
+// Fortschritt der Cloud-GPU zuverlässig per HTTP abholen (zusätzlich zur Live-Verbindung)
+async function remoteProgress(run){
+  if(run.rpBusy || Date.now() - (run.rpAt || 0) < 2000) return;
+  run.rpBusy = true; run.rpAt = Date.now();
+  try{
+    const j = await api(run.B + "/easy/progress?since=" + (run.rpSeq || 0));
+    if(state.run !== run) return;
+    if(run.rpSeq == null){ run.rpSeq = j.seq || 0; }    // erster Abruf: nur Startpunkt merken
+    else {
+      for(const e of j.events || []){ run.rpSeq = Math.max(run.rpSeq, e.seq); if(state.run === run) onWS({ type: e.type, data: e.data || {} }); }
+      if(j.seq != null) run.rpSeq = Math.max(run.rpSeq, j.seq);
+    }
+  }catch(e){}
+  finally{ run.rpBusy = false; }
+  if(state.run === run && (!run.poll || Date.now() - run.poll > 6000)){ run.poll = Date.now(); pollDone(); }
 }
 function closeRemoteWS(){ try{ if(rws) rws.close(); }catch(e){} rws = null; }
 const gpu = { info: null };
@@ -2283,8 +2300,9 @@ function workUnits(){
   return px * len * n / 1e6;
 }
 const etaHist = store.get("etaHist", {});
+const etaKey = (name, k) => (state.compute[k || state.kind] === "gpu" ? "gpu:" : "") + name;
 function estimate(){
-  const h = etaHist[state.active[state.kind]];
+  const h = etaHist[etaKey(state.active[state.kind])];
   if(!h || !h.length) return null;
   const rates = h.slice(-6).map(x => x.secs / Math.max(0.01, x.units)).sort((a, b) => a - b);
   const med = rates[Math.floor(rates.length / 2)];

@@ -15,7 +15,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -59,6 +59,44 @@ async def easy_i18n(request):
 @routes.get("/easy/version")
 async def easy_version(request):
     return web.json_response({"version": VERSION})
+
+
+# ---------------------------------------------------------------- Fortschritt (auch per HTTP abrufbar)
+# Die Cloud-GPU wird über einen Umweg angesprochen; damit der Fortschritt dort zuverlässig ankommt,
+# merken wir uns die letzten Meldungen von ComfyUI und liefern sie unter /easy/progress aus.
+PROGRESS = {"events": [], "seq": 0}
+
+
+def _track_progress():
+    srv = PromptServer.instance
+    orig = srv.send_sync
+
+    def send_sync(event, data, sid=None):
+        try:
+            if event in ("execution_start", "execution_cached", "executing", "progress", "executed",
+                         "execution_success", "execution_error", "execution_interrupted"):
+                PROGRESS["seq"] += 1
+                d = data if isinstance(data, dict) else {}
+                small = {k: d.get(k) for k in ("prompt_id", "node", "nodes", "value", "max", "exception_message", "node_type") if k in d}
+                PROGRESS["events"].append({"seq": PROGRESS["seq"], "type": event, "data": small})
+                if len(PROGRESS["events"]) > 300:
+                    del PROGRESS["events"][:100]
+        except Exception:
+            pass
+        return orig(event, data, sid)
+    srv.send_sync = send_sync
+
+
+try:
+    _track_progress()
+except Exception as _e:
+    print("[Easy Generate] Fortschritt nicht verfolgbar:", _e)
+
+
+@routes.get("/easy/progress")
+async def easy_progress(request):
+    since = int(request.query.get("since", "0") or 0)
+    return web.json_response({"seq": PROGRESS["seq"], "events": [e for e in PROGRESS["events"] if e["seq"] > since]})
 
 
 # ---------------------------------------------------------------- Einstellungen
