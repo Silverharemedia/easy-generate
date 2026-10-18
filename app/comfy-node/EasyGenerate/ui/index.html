@@ -549,6 +549,8 @@ function renderStudio(){
   }
   const needPrompt = !!info.pos;
   ["#promptLbl", "#prompt", "#aiBtn"].forEach(s => $(s).classList.toggle("hidden", !needPrompt));
+  const helperOn = state.cfg.provider === "claude" ? !!state.cfg.claude_key_set : !!state.cfg.ollama_model;
+  if(!helperOn) $("#aiBtn").classList.add("hidden");
   if(!needPrompt) $("#aiBox").classList.add("hidden");
   $("#promptLbl").textContent = k === "video" ? (info.images.length ? "Was soll im Video passieren?" : "Beschreibe dein Video") : (info.images.length ? "Was soll am Bild passieren / entstehen?" : "Beschreibe dein Bild");
   $("#prompt").placeholder = k === "video" ? "z. B. Eine Katze läuft durch einen verschneiten Wald, sanftes Morgenlicht, Kamera folgt langsam" : "z. B. Ein gemütliches Café in Paris bei Regen, warmes Licht, fotorealistisch";
@@ -1128,25 +1130,36 @@ async function refreshOllama(){
   }
   // empfohlene Modelle
   const rec = $("#olRec"); rec.innerHTML = "";
+  const activeName = state.cfg.provider === "ollama" ? (state.cfg.ollama_model || "") : "";
   for(const m of OL_REC){
-    const have = olModels.some(x => x === m.id || x.startsWith(m.id + "-") || x === m.id + ":latest");
+    const name = olModels.find(x => x === m.id || x.startsWith(m.id + "-") || x === m.id + ":latest");
+    const active = !!name && activeName === name;
     const d = document.createElement("div"); d.className = "row";
-    d.innerHTML = `<div style="flex:1"><b>${esc(m.n)}</b><div class="hint">${esc(m.d)}</div></div>`;
+    d.style.cssText = active ? "background:#12261d;border:1px solid #1f5a3e;border-radius:10px;padding:8px 10px" : "padding:8px 10px";
+    d.innerHTML = `<div style="flex:1"><b>${esc(m.n)}</b>${active ? ` <span class="ok" style="font-size:12px">✓ aktiv</span>` : ""}<div class="hint">${esc(m.d)}</div></div>`;
     const b = document.createElement("button"); b.type = "button";
-    b.className = "btn " + (have ? "" : "pri"); b.textContent = have ? "Benutzen" : "Laden";
-    b.onclick = () => have ? useOllamaModel(m.id) : pullOllama(m.id);
+    b.className = "btn " + (!name ? "pri" : active ? "danger" : "");
+    b.textContent = !name ? "Laden" : active ? "Ausschalten" : "Benutzen";
+    b.onclick = () => !name ? pullOllama(m.id) : active ? turnOffHelper() : useOllamaModel(m.id);
     d.appendChild(b); rec.appendChild(d);
   }
   const sel = $("#olModel"); sel.innerHTML = "";
+  { const o = document.createElement("option"); o.value = ""; o.textContent = "– aus –"; sel.appendChild(o); }
   for(const m of olModels){ const o = document.createElement("option"); o.value = o.textContent = m; sel.appendChild(o); }
-  if(state.cfg.ollama_model && olModels.includes(state.cfg.ollama_model)) sel.value = state.cfg.ollama_model;
+  sel.value = olModels.includes(activeName) ? activeName : "";
   $("#olMsg").textContent = olModels.length ? "" : "Noch kein Modell – lade oben eins mit einem Klick.";
 }
+async function turnOffHelper(){
+  state.cfg = await api("/easy/config", { ollama_model: "" });
+  toast("Prompt-Helfer ausgeschaltet.", "ok", 3000);
+  refreshOllama();
+}
 async function useOllamaModel(id){
+  if(!id) return turnOffHelper();
   const name = olModels.find(x => x === id || x.startsWith(id)) || id;
   state.cfg = await api("/easy/config", { provider: "ollama", ollama_model: name });
   toast(`✅ ${esc(name)} wird jetzt für den Prompt-Helfer verwendet.`, "ok");
-  renderSettings();
+  refreshOllama();
 }
 let olPullTimer = null;
 async function pullOllama(id){

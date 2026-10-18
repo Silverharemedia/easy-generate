@@ -5,7 +5,8 @@
   "use strict";
   const EN = {
     // Navigation & allgemein
-    "System": "System", "Video": "Video", "Bild": "Image", "Galerie": "Gallery", "Modelle": "Models", "Einstellungen": "Settings",
+    "System": "System", "Ausschalten": "Turn off", "✓ aktiv": "✓ active", "– aus –": "– off –",
+    "Prompt-Helfer ausgeschaltet.": "Prompt helper turned off.", "Der Prompt-Helfer ist ausgeschaltet.": "The prompt helper is turned off.", "Video": "Video", "Bild": "Image", "Galerie": "Gallery", "Modelle": "Models", "Einstellungen": "Settings",
     "Verbinde …": "Connecting …", "Bereit": "Ready", "ComfyUI nicht erreichbar": "ComfyUI not reachable",
     "Ein-/Ausklappen": "Expand/collapse", "Abbrechen": "Cancel", "Speichern": "Save", "Aktualisieren": "Refresh",
     "Installieren": "Install", "Herunterladen": "Download", "Laden": "Download", "Benutzen": "Use", "Neu": "New",
@@ -153,7 +154,8 @@
   };
 
   const RU = {
-   "System": "Система",
+   "System": "Система", "Ausschalten": "Выключить", "✓ aktiv": "✓ активна", "– aus –": "– выкл. –",
+   "Prompt-Helfer ausgeschaltet.": "Помощник для промптов выключен.", "Der Prompt-Helfer ist ausgeschaltet.": "Помощник для промптов выключен.",
    "Video": "Видео",
    "Bild": "Изображение",
    "Galerie": "Галерея",
@@ -523,10 +525,11 @@
   window.EG_I18N = {
     get lang() { return lang; },
     tr,
-    setLang(l, reload = true) {
+    async setLang(l, reload = true) {
       lang = ["en", "ru"].includes(l) ? l : "de";
       try { localStorage.setItem("eg_lang", lang); } catch (e) {}
-      if (window.easyApp && window.easyApp.setLang) window.easyApp.setLang(lang);
+      // erst im Programm speichern, DANN neu laden – sonst setzt der Abgleich beim Laden die alte Sprache zurück
+      if (window.easyApp && window.easyApp.setLang) { try { await window.easyApp.setLang(lang); } catch (e) {} }
       if (reload) location.reload();
     },
     // Sprache aus dem Programm übernehmen (falls dort anders eingestellt)
