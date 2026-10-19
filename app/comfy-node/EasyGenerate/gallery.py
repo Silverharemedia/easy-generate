@@ -256,7 +256,7 @@ def item_for(path, ix, root_key):
             "kind": meta.get("kind") or ("video" if path.lower().endswith(VIDEO) else "image"),
             "prompt": meta.get("prompt", ""), "cloud": meta.get("source") == "cloud" or "easy-cloud" in path.replace("\\", "/"),
             "created": meta.get("created") or st.st_mtime, "size": st.st_size, "temp": root_key == "t",
-            "r": ref["r"] if ref else None, "p": ref["p"] if ref else None, "path": path}
+            "r": ref["r"] if ref else None, "p": ref["p"] if ref else None, "path": path, "fav": bool(meta.get("fav"))}
 
 
 def scan():
@@ -378,6 +378,27 @@ async def gallery_add(request):
                 out.append(dict(ref, name=os.path.basename(t)))
         job_put(job, out)
     return web.json_response({"files": out})
+
+
+@routes.post("/easy/gallery/fav")
+async def gallery_fav(request):
+    """Favorit (⭐) setzen oder entfernen – steht im Galerie-Index."""
+    data = await request.json()
+    ap = path_from(data.get("r"), data.get("p"))
+    if not ap:
+        return web.json_response({"error": "nicht gefunden"}, status=404)
+    with LOCK:
+        ix = index()
+        m = dict(ix.get(key(ap)) or {})
+        if not m.get("created"):
+            try:
+                m["created"] = os.path.getmtime(ap)
+            except OSError:
+                pass
+        m["fav"] = bool(data.get("fav"))
+        ix[key(ap)] = m
+        save_index(ix)
+    return web.json_response({"ok": True, "fav": m["fav"]})
 
 
 @routes.post("/easy/gallery/delete")

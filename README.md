@@ -28,6 +28,9 @@ Updates installiert Easy Generate selbst (Einstellungen → „Nach Updates such
   - 🚀 **Meine Cloud-GPU** – die eigenen Vorlagen auf einer gemieteten Grafikkarte (siehe unten).
   - ☁️ **HuggingFace-Cloud** – kostenlose ZeroGPU-Spaces oder Bezahlung pro Video, ganz ohne Download.
 - ✨ **KI-Prompt-Helfer** – macht aus einer kurzen Idee (auch auf Deutsch) einen guten englischen Prompt; lokal über Ollama oder mit Claude. Sieht auf Wunsch auch das Startbild an.
+- ➕ **Weiter** – verlängert ein fertiges Video: das letzte Bild wird automatisch Startbild des nächsten Abschnitts (für Szenen über 20 Sekunden).
+- 🎲 **Varianten** – mehrere Versionen mit verschiedenen Seeds auf einmal, auf Wunsch verteilt auf alle GPUs.
+- 🧠 **Speicher-Warnung**, wenn ein Modell zu groß für PC-Arbeitsspeicher + Grafikkarte ist.
 - ⏱️ **Zeitschätzung** – lernt aus deinen bisherigen Erstellungen, wie lange ein Video ungefähr dauert.
 
 ### 📋 Warteschlange
@@ -41,6 +44,8 @@ Updates installiert Easy Generate selbst (Einstellungen → „Nach Updates such
 - **Mehrere GPUs gleichzeitig** mieten und nutzen, z. B. GPU 1 für Bild → Video, GPU 2 für Text → Video. Die GPU-Wahl wird pro Modell gemerkt.
 - Modelle werden direkt im Rechenzentrum geladen – kein Download auf den PC nötig.
 - **Kosten im Blick:** Guthaben, Verbrauch im Monat und „reicht noch für ≈ X Std.“ direkt im Studio – auch für mehrere laufende GPUs zusammen.
+- 🛑 **Tageslimit:** ab einem selbst gewählten Betrag pro Tag werden alle Cloud-GPUs automatisch pausiert.
+- ⚡ **Schnellstart (optional):** Modelle bleiben in einem privaten Hugging-Face-Speicher und müssen nach dem Aufwachen nicht neu geladen werden (inklusive bis 100 GB, mit PRO 1 TB).
 - **Spart Geld:** Pausieren/Starten mit einem Klick, automatisches Ausschalten ohne Nutzung, ☕ „Pausieren, wenn die Warteschlange fertig ist“ (für „ich gehe kurz weg“) und ☕ „nach dem Einrichten pausieren“.
 
 ### ☁️ Hugging-Face-Cloud
@@ -57,6 +62,7 @@ Updates installiert Easy Generate selbst (Einstellungen → „Nach Updates such
 
 ### 📁 Galerie
 - Alle Ergebnisse, **nach Modell sortiert**, mit Prompt – auch Ergebnisse aus der Cloud.
+- 🔎 **Suche** nach Prompt/Modell und ⭐ **Favoriten**.
 - Speicherort frei wählbar (ohne doppelten Speicherplatz) oder Galerie ganz abschalten.
 
 ### 🛡️ Zuverlässigkeit

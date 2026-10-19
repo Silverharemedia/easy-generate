@@ -26,7 +26,8 @@ SPACE_NAME = "eg-comfyui"
 MAX_SLOTS = 20
 # Nur erhoehen, wenn sich etwas aendert, das auf der Cloud-GPU selbst laufen muss
 # (dann wird dort ein Update angeboten). 2 = Fortschritt per /easy/progress.
-REMOTE_API = 2
+REMOTE_API = 3          # 3 = Schnellstart-Speicher (/data) wird unterstuetzt
+BUCKET_NAME = "eg-models"
 
 DOCKERFILE = """FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg libgl1 libglib2.0-0 \\
@@ -39,8 +40,24 @@ RUN pip install --user torch torchvision torchaudio --index-url https://download
 RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git \\
     && pip install --user -r ComfyUI/requirements.txt && pip install --user psutil
 COPY --chown=user EasyGenerate /home/user/ComfyUI/custom_nodes/EasyGenerate
+COPY --chown=user start.sh /home/user/start.sh
 EXPOSE 7860
-CMD ["python", "ComfyUI/main.py", "--listen", "0.0.0.0", "--port", "7860", "--disable-auto-launch"]
+CMD ["sh", "/home/user/start.sh"]
+"""
+
+# Ist der Schnellstart-Speicher (privater Bucket) unter /data eingebunden, liegen die Modelle dort dauerhaft.
+START_SH = """#!/bin/sh
+cd /home/user
+if [ -d /data ] && [ -w /data ]; then
+  mkdir -p /data/models
+  if [ ! -L ComfyUI/models ]; then
+    cp -rn ComfyUI/models/. /data/models/ 2>/dev/null
+    rm -rf ComfyUI/models && ln -s /data/models ComfyUI/models
+  fi
+  export EG_SHARED_MODELS=1
+  echo "[Easy Generate] Schnellstart-Speicher aktiv: /data/models"
+fi
+exec python ComfyUI/main.py --listen 0.0.0.0 --port 7860 --disable-auto-launch
 """
 
 README = """---
@@ -122,7 +139,7 @@ async def commit_files(repo_id, files, message):
 
 
 def program_files():
-    files = [("Dockerfile", DOCKERFILE), ("README.md", README)]
+    files = [("Dockerfile", DOCKERFILE), ("README.md", README), ("start.sh", START_SH)]
     for path, p in node_files():
         with open(p, "rb") as fh:
             files.append((path, fh.read()))
@@ -175,6 +192,11 @@ async def comfy_create(request):
         save_cstate(st)
         if data.get("pause_when_ready"):
             ensure_watch(sid)
+        if cstate().get("model_store"):
+            try:
+                await _set_volumes(sid, True, await _bucket_id())
+            except Exception as err:
+                print("[Easy Generate] Schnellstart-Speicher konnte nicht eingebunden werden:", err)
         return web.json_response({"id": sid, "slot": slot})
     except HFError as e:
         msg = e.text
@@ -245,6 +267,93 @@ async def comfy_list(request):
     xs = comfy_entries()
     items = await asyncio.gather(*[_info(x) for x in xs]) if xs else []
     return web.json_response({"items": list(items), "space_token": bool(space_token()), "version": VERSION})
+
+
+# ------------------------------------------------------------------ Schnellstart-Speicher (optional)
+# Ein privater Bucket im eigenen HF-Konto wird in alle Cloud-GPUs unter /data eingebunden.
+# Modelle werden dort nur einmal gespeichert; jeder weitere Start findet sie sofort.
+# Privater Speicher ist bei Hugging Face bis 100 GB (kostenloses Konto) bzw. 1 TB (PRO) inklusive.
+async def _bucket_id():
+    me = await hf("GET", "/api/whoami-v2")
+    return f"{me['name']}/{BUCKET_NAME}"
+
+
+async def _set_volumes(sid, on, bid):
+    if on:
+        await hf("PUT", f"/api/spaces/{sid}/volumes", body={"volumes": [{"type": "bucket", "source": bid, "mountPath": "/data"}]}, timeout=30)
+    else:
+        try:
+            await hf("DELETE", f"/api/spaces/{sid}/volumes", timeout=30)
+        except HFError as e:
+            if e.status != 404:
+                raise
+
+
+@routes.get("/easy/cloud/comfy/storage")
+async def comfy_storage_info(request):
+    st = cstate()
+    out = {"on": bool(st.get("model_store")), "bucket": None, "size": None, "files": None}
+    if not token():
+        return web.json_response(out)
+    try:
+        bid = await _bucket_id()
+        out["bucket"] = bid
+        b = await hf("GET", f"/api/buckets/{bid}", timeout=15)
+        out["size"], out["files"], out["exists"] = b.get("size"), b.get("totalFiles"), True
+    except HFError as e:
+        out["exists"] = False if e.status == 404 else None
+    except Exception:
+        pass
+    return web.json_response(out)
+
+
+@routes.post("/easy/cloud/comfy/storage")
+async def comfy_storage(request):
+    data = await request.json()
+    act = str(data.get("action") or "")
+    if not token():
+        return web.json_response({"error": "AUTH"}, status=400)
+    try:
+        bid = await _bucket_id()
+        if act == "on":
+            try:
+                await hf("POST", f"/api/buckets/{bid}", body={"visibility": "private"}, timeout=30)
+            except HFError as e:
+                if e.status != 409:
+                    raise
+            files = program_files()
+            for x in comfy_entries():
+                if int(x.get("api") or 1) < REMOTE_API:          # Startskript mit /data-Unterstuetzung aufspielen
+                    await commit_files(x["id"], files, f"Easy Generate {VERSION}")
+                    st = cstate(); e = _rented_entry(st, x["id"])
+                    if e:
+                        e["version"], e["api"] = VERSION, REMOTE_API
+                        save_cstate(st)
+                await _set_volumes(x["id"], True, bid)
+            st = cstate(); st["model_store"] = True; save_cstate(st)
+        elif act in ("off", "delete"):
+            for x in comfy_entries():
+                await _set_volumes(x["id"], False, bid)
+            st = cstate(); st["model_store"] = False; save_cstate(st)
+            if act == "delete":
+                try:
+                    await hf("DELETE", f"/api/buckets/{bid}", timeout=30)
+                except HFError as e:
+                    if e.status != 404:
+                        raise
+        else:
+            return web.json_response({"error": "unbekannt"}, status=400)
+        return web.json_response({"ok": True})
+    except HFError as e:
+        msg = e.text
+        try:
+            msg = json.loads(e.text).get("error", msg)
+        except Exception:
+            pass
+        code = "PAYMENT|" if e.status == 402 else ("AUTH|" if e.status in (401, 403) else "")
+        return web.json_response({"error": code + str(msg)[:400]}, status=400)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
 
 
 # ------------------------------------------------------------------ Durchreichen an die Cloud-GPU

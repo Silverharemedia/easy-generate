@@ -16,7 +16,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.8.4"
+VERSION = "1.8.5"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -500,7 +500,8 @@ async def _download_one(session, m):
     if os.path.isfile(dst):
         m["got"] = m["size"] = os.path.getsize(dst)
         return
-    part = dst + ".part"
+    # gemeinsamer Schnellstart-Speicher (mehrere Cloud-GPUs): eigene Teildatei je Rechner
+    part = dst + (".part-" + __import__("socket").gethostname() if os.environ.get("EG_SHARED_MODELS") else ".part")
     have = os.path.getsize(part) if os.path.exists(part) else 0
     headers = {"Range": f"bytes={have}-"} if have else {}
     token = load_cfg().get("hf_token")

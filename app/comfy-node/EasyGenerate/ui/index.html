@@ -108,6 +108,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
 .gsec{margin:18px 0 8px;display:flex;align-items:baseline;gap:10px}.gsec h3{margin:0;font-size:15px}
 .gal .meta .ac{display:flex;gap:8px;flex:none}.gal .meta .ac a,.gal .meta .ac button{background:none;border:0;color:var(--accent2);cursor:pointer;padding:0;font-size:12px;text-decoration:none}
 .gal .meta .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gal .meta .ac .fav{color:var(--muted)} .gal .meta .ac .fav.on{color:#ffc53d}
 .gopt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-top:8px;cursor:pointer}.gopt.act{border-color:var(--accent);background:#2a1b16}
 .mc2 .spec{color:var(--text);opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mc2 svg{width:100%;height:38px;display:block;margin-top:6px}
@@ -258,6 +259,9 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
             <label class="row hidden" id="turboRow" style="gap:8px;margin-top:12px"><input type="checkbox" id="turbo"> <span id="turboLbl">Schnell-Modus</span></label>
             <label class="l">Seed (gleicher Seed + gleicher Prompt = gleiches Ergebnis)</label>
             <div class="row"><label class="row" style="gap:6px;white-space:nowrap"><input type="checkbox" id="seedRand" checked> zufällig</label><input type="number" id="seed" min="0" placeholder="Seed" disabled></div>
+            <label class="l">Varianten (gleicher Prompt, verschiedene Seeds)</label>
+            <div class="chips" id="varChips"></div>
+            <label class="row hint hidden" id="varSpreadRow" style="gap:8px;margin-top:8px;color:var(--text)"><input type="checkbox" id="varSpread"> <span>Auf alle Cloud-GPUs verteilen (schneller fertig, jede GPU kostet)</span></label>
           </details>
 
           <button class="big" id="go">Erstellen</button>
@@ -273,7 +277,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
             <div class="actions" style="margin-top:10px"><button class="btn danger" id="stop">Abbrechen</button></div>
           </div>
           <div id="out"></div>
-          <div class="actions hidden" id="resActions"><button class="btn pri hidden" id="showDir" type="button">📂 Im Ordner zeigen</button><a class="btn" id="dl" download>Herunterladen</a><button class="btn" id="again">Nochmal (neuer Seed)</button></div>
+          <div class="actions hidden" id="resActions"><button class="btn pri hidden" id="contBtn" type="button" title="Das letzte Bild dieses Videos wird das Startbild für das nächste – so entsteht eine längere Szene.">➕ Weiter</button><button class="btn pri hidden" id="showDir" type="button">📂 Im Ordner zeigen</button><a class="btn" id="dl" download>Herunterladen</a><button class="btn" id="again">Nochmal (neuer Seed)</button></div>
           <p class="hint" id="keptHint" style="margin:6px 0 0"></p>
         </div>
         <div class="card qcard hidden" id="queueCard"><div id="queueBox"></div></div>
@@ -297,7 +301,7 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
   <section id="gallery" class="hidden">
     <h1>Galerie</h1><p class="sub">Deine Videos und Bilder – sortiert nach Modell</p>
     <div class="row hint" id="galInfo" style="flex-wrap:wrap;margin:-6px 0 14px"></div>
-    <div class="toolbar"><div class="chips" id="galFilter"></div><button class="btn" id="galReload" style="margin-left:auto">Aktualisieren</button></div>
+    <div class="toolbar"><div class="chips" id="galFilter"></div><input type="text" id="galSearch" placeholder="Suchen (Prompt, Modell, Datei) …" style="max-width:280px"><button class="btn" id="galReload" style="margin-left:auto">Aktualisieren</button></div>
     <div class="chips" id="galModels" style="margin-bottom:6px"></div>
     <div id="gal"></div><div id="galWrap"></div>
   </section>
@@ -700,7 +704,10 @@ function renderStudio(){
   $("#enhRow").classList.toggle("hidden", !info.enh);
   $("#turboRow").classList.toggle("hidden", !info.turbo);
   if(info.turbo) $("#turboLbl").textContent = "Schnell-Modus (" + info.turbo.title + ")";
-  $("#go").textContent = k === "video" ? "Video erstellen" : (state.batch > 1 ? `${state.batch} Bilder erstellen` : "Bild erstellen");
+  chips($("#varChips"), [1, 2, 3, 4].map(n => [n, { n: String(n) }]), state.variants || 1, n => { state.variants = n; renderStudio(); });
+  $("#varSpreadRow").classList.toggle("hidden", !(state.compute[k] === "gpu" && (gpu.list || []).length > 1 && (state.variants || 1) > 1));
+  const nv = state.variants || 1;
+  $("#go").textContent = k === "video" ? (nv > 1 ? T(`${nv} Videos erstellen`) : "Video erstellen") : (state.batch > 1 ? `${state.batch} Bilder erstellen` : (nv > 1 ? T(`${nv} Bilder erstellen`) : "Bild erstellen"));
   renderEta();
   updateGo();
 }
@@ -827,18 +834,79 @@ function laneName(B){
 const multiLane = () => new Set([...state.runs, ...state.queue].map(j => j.B).concat(Object.keys(gpuPrep).filter(b => gpuPrep[b]))).size > 1;
 const lanePrefix = run => multiLane() || run.B !== curB() ? (run.B ? "🚀 GPU " + slotOfB(run.B) : "🖥️ " + T("Mein PC")) + ": " : "";
 
-async function generate(){
+// Erstellen-Knopf: eine oder mehrere Varianten (auf Wunsch auf alle Cloud-GPUs verteilt)
+async function startGenerate(){
+  const k = state.kind, n = state.variants || 1;
+  const B0 = state.compute[k] === "gpu" ? gpuB() : "";
+  if(B0 === "" && !(await memoryOk())) return;
+  if(B0 && !budgetOk()) return;
+  if(n <= 1) return generate();
+  const lanes = state.compute[k] === "gpu" && $("#varSpread").checked && (gpu.list || []).length > 1 ? gpu.list.map(g => g.B) : [B0];
+  const groups = {};
+  for(let i = 0; i < n; i++){ const B = lanes[i % lanes.length]; (groups[B] = groups[B] || []).push(Math.floor(Math.random() * 2 ** 48)); }
+  // je Rechner nacheinander, die Rechner gleichzeitig
+  await Promise.all(Object.entries(groups).map(async ([B, seeds]) => { for(const seed of seeds) await generate({ B, seed }); }));
+}
+// 🛑 Tageslimit für Cloud-Kosten: geschätzt aus der Laufzeit der Cloud-GPUs (sofort) und – wenn angemeldet – aus dem Guthaben
+const today = () => new Date().toISOString().slice(0, 10);
+function spendState(){
+  let sp = store.get("spend", null);
+  if(!sp || sp.day !== today()) sp = { day: today(), est: 0, w0: null, hit: false };
+  return sp;
+}
+const budgetLimit = () => +store.get("budgetDay", 0) || 0;
+function spentToday(){
+  const sp = spendState(), w = cloud.wallet && typeof cloud.wallet.balance === "number" ? cloud.wallet.balance : null;
+  const fromWallet = sp.w0 != null && w != null ? Math.max(0, sp.w0 - w) : 0;
+  return Math.max(sp.est || 0, fromWallet);
+}
+function budgetOk(){
+  const lim = budgetLimit(); if(!lim) return true;
+  const sp = spentToday(); if(sp < lim) return true;
+  return confirm(T(`🛑 Dein Tageslimit von ${usd(lim)} ist erreicht (heute ca. ${usd(sp)}).`) + "\n\n" + T("Trotzdem eine Cloud-GPU benutzen?"));
+}
+async function budgetTick(){
+  const lim = budgetLimit(), sp = spendState();
+  const w = cloud.wallet && typeof cloud.wallet.balance === "number" ? cloud.wallet.balance : null;
+  if(w != null && sp.w0 == null) sp.w0 = w;
+  if(lim || (gpu.list || []).some(e => isOn(e.stage))){
+    try{ const j = await api("/easy/cloud/comfy/list"); if(j && Array.isArray(j.items)){ gpu.list = j.items; } }catch(e){}
+    for(const e of gpu.list || []) if(isOn(e.stage)) sp.est = (sp.est || 0) + (hwOf(e).per_hour || 0) / 60;
+  }
+  store.set("spend", sp);
+  if(lim && !sp.hit && spentToday() >= lim){
+    sp.hit = true; store.set("spend", sp);
+    await api("/easy/cloud/pause_all", { force: true });
+    (gpu.list || []).forEach(g => dropLane(g.B, "Abgebrochen."));
+    toast("🛑 " + esc(T(`Tageslimit von ${usd(lim)} erreicht – alle Cloud-GPUs wurden pausiert.`)), "warn", 20000);
+    gpu.list = null; if(state.tab === "video" || state.tab === "image") renderStudio();
+  }
+}
+setInterval(budgetTick, 60000);
+// Warnung vor sehr großen Modellen auf dem eigenen PC (sonst kann ComfyUI abstürzen)
+const memWarned = new Set();
+async function memoryOk(){
+  const key = state.active[state.kind], c = (state.catalog || []).find(x => x.name === key), sys = state.sys;
+  if(!c || !c.size || !sys || !sys.ram_total || memWarned.has(key)) return true;
+  const free = (sys.ram_total - (sys.ram_used || 0)) + (sys.vram_total || 0);
+  if(c.size < free * 0.8) return true;
+  memWarned.add(key);
+  return confirm(T(`⚠️ Dieses Modell ist mit ca. ${GBf(c.size)} sehr groß – auf deinem PC sind gerade ca. ${GBf(free)} frei (Arbeitsspeicher + Grafikspeicher).`) + "\n\n" + T("ComfyUI kann dabei abstürzen. Tipp: Größe „Schnell“ wählen, andere Programme schließen oder auf der 🚀 Cloud-GPU erstellen.") + "\n\n" + T("Trotzdem auf dem PC erstellen?"));
+}
+async function generate(opts){
+  opts = opts || {};
   const k = state.kind, key = state.active[k], info = curInfo();
   if(!info) return;
   if(!$("#prompt").value.trim() && info.pos){ showMsg("warn", "Bitte beschreibe zuerst, was entstehen soll."); return; }
   const missingImg = info.images.find(im => !state.images[im.id]);
   if(missingImg){ showMsg("warn", `Bitte zuerst „${missingImg.title}“ auswählen.`); return; }
-  const B = state.compute[k] === "gpu" ? gpuB() : "";
+  const B = opts.B !== undefined ? opts.B : (state.compute[k] === "gpu" ? gpuB() : "");
   if(B == null){ showMsg("warn", "Es ist noch keine Cloud-GPU eingerichtet."); return; }
   if(B && gpuPrep[B]) return;
   if(!state.runs.length && !Object.values(gpuPrep).some(Boolean)){ $("#out").innerHTML = ""; $("#resActions").classList.add("hidden"); }
   let seed;
-  if($("#seedRand").checked){ seed = Math.floor(Math.random() * 2 ** 48); $("#seed").value = seed; }
+  if(opts.seed != null) seed = opts.seed;
+  else if($("#seedRand").checked){ seed = Math.floor(Math.random() * 2 ** 48); $("#seed").value = seed; }
   else seed = Math.max(0, parseInt($("#seed").value || "0", 10));
   // alles sofort festhalten – während die GPU startet, darf man schon das nächste Video vorbereiten
   const promptText = $("#prompt").value.trim(), units = workUnits(), est = estimate();
@@ -985,7 +1053,7 @@ function renderQueue(){
   if(!show){ el.innerHTML = ""; renderQueue.last = ""; return; }
   const btn = (act, id, icon, title, cls) => `<button class="qbtn ${cls || ""}" type="button" data-a="${act}" data-q="${esc(id)}" title="${esc(T(title))}">${icon}</button>`;
   const thumb = j => `<div class="qthumb" ${j.thumb ? `style="background-image:url('${j.thumb}')"` : ""}>${j.thumb ? "" : (j.kind === "image" ? "🖼️" : "🎬")}</div>`;
-  const tools = j => btn("copy", j.id, "📋", "Prompt kopieren") + (j.inputs && j.inputs.length || j.prompt ? btn("use", j.id, "↩", "Bild und Prompt übernehmen") : "");
+  const tools = j => btn("copy", j.id, "📋", "Prompt kopieren") + (j.inputs && j.inputs.length || j.prompt ? btn("use", j.id, "↩", "Bild und Prompt übernehmen") : "") + (j.files && j.files.length && isVideo(j.files[0]) ? btn("cont", j.id, "➕", "Weiter: letztes Bild als Start für das nächste Video") : "");
   const item = (j, status, extra, cls, sid) => `<div class="qitem ${cls}" style="--lc:${laneColor(j.B)}" data-id="${esc(j.id)}">${thumb(j)}<div class="qbody"><div class="qtitle" translate="no">${esc(j.title || j.key)}</div><div class="qprompt" translate="no" title="${esc(j.prompt || "")}">${esc(j.prompt || "–")}</div><div class="qfoot"><span class="qs" ${sid ? `id="${sid}"` : ""}>${esc(status)}</span>${tools(j)}${extra}</div></div></div>`;
   let html = `<h4>📋 <span>${esc(T("Warteschlange"))}</span> <span class="hint">(${all.length})</span><span class="sp"></span></h4>`;
   if(!all.length && !preps.length) html += `<div class="hint" style="margin-bottom:8px">${esc(T("Gerade läuft nichts."))}</div>`;
@@ -1021,6 +1089,7 @@ async function queueAction(act, id){
     return;
   }
   if(act === "use") return reuseJob(j);
+  if(act === "cont" && j.files && j.files[0]) return continueFrom(j.files[0], j.prompt);
 }
 // Bild und Prompt eines Auftrags ins Formular übernehmen (für einen neuen Lauf)
 async function reuseJob(j){
@@ -1189,6 +1258,9 @@ function mediaEl(f, controls){
 function showResult(files){
   const v = $("#viewer"); v.innerHTML = "";
   const vids = files.filter(isVideo), list = vids.length ? [vids[0]] : files;
+  state.lastResult = list[0];
+  $("#contBtn").classList.toggle("hidden", !isVideo(list[0]));
+  $("#contBtn").onclick = () => continueFrom(list[0], $("#prompt").value);
   v.classList.toggle("multi", list.length > 1);
   for(const f of list){ const el = mediaEl(f, true); v.appendChild(el); if(isVideo(f)) el.play().catch(() => {}); }
   $("#dl").href = dlUrl(list[0]); $("#dl").setAttribute("download", fname(list[0]));
@@ -1199,6 +1271,42 @@ function showResult(files){
   $("#keptHint").textContent = gal.mode === "temp" ? `Hinweis: Ohne Galerie wird das Ergebnis nach ${gal.temp_hours || 24} Std. gelöscht – jetzt herunterladen.` : own ? "Schon gespeichert im Galerie-Ordner – Herunterladen ist nicht nötig." : "";
   $("#resActions").classList.remove("hidden");
 }
+// ➕ Weiter: letztes Bild eines Videos als Startbild für das nächste (für längere Szenen)
+async function lastFrame(f){
+  const v = document.createElement("video");
+  v.muted = true; v.preload = "auto"; v.src = viewUrl(f);
+  await new Promise((ok, bad) => { v.onloadedmetadata = ok; v.onerror = () => bad(new Error("Video nicht lesbar")); setTimeout(() => bad(new Error("Zeitüberschreitung")), 15000); });
+  v.currentTime = Math.max(0, (v.duration || 0) - 0.05);
+  await new Promise((ok, bad) => { v.onseeked = ok; setTimeout(ok, 5000); });
+  await new Promise(r => setTimeout(r, 150));
+  const c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext("2d").drawImage(v, 0, 0);
+  const blob = await new Promise(r => c.toBlob(r, "image/png"));
+  if(!blob) throw new Error("Bild konnte nicht gelesen werden");
+  return new File([blob], "weiter_" + Date.now() + ".png", { type: "image/png" });
+}
+async function continueFrom(f, prompt){
+  try{
+    toast("➕ " + esc(T("Hole das letzte Bild des Videos …")), "ok", 2000);
+    const file = await lastFrame(f);
+    if(state.kind !== "video") showTab("video");
+    // Werkzeug mit Startbild wählen (am liebsten aus derselben Modellfamilie)
+    const hasImg = t => { const i = state.info[t.name]; return i && i.images.some(x => x.media === "image"); };
+    const cur = toolsOf("video").find(t => t.name === state.active.video);
+    if(!cur || !hasImg(cur)){
+      const fam = cur ? cur.title.split(":")[0] : "";
+      const cand = toolsOf("video").filter(hasImg);
+      const pick = cand.find(t => fam && t.title.startsWith(fam) && /image to video|i2v/i.test(t.title)) || cand.find(t => fam && t.title.startsWith(fam)) || cand.find(t => /image to video|i2v/i.test(t.title)) || cand[0];
+      if(!pick){ toast("⚠️ " + esc(T("Kein Video-Modell mit Startbild installiert (z. B. „Image to Video“).")), "warn", 6000); return; }
+      state.active.video = pick.name; renderStudio();
+    }
+    const slot = curInfo().images.find(x => x.media === "image");
+    setImage(slot.id, file);
+    if(prompt != null){ $("#prompt").value = prompt; $("#prompt").dispatchEvent(new Event("input")); }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    toast("➕ " + esc(T("Letztes Bild übernommen – beschreibe, wie es weitergeht, und erstelle das nächste Stück.")), "ok", 6000);
+  }catch(e){ toast("❌ " + esc(String(e.message || e)), "err", 6000); }
+}
 async function showInFolder(f){
   const r = await api("/easy/gallery/path", { r: f.r, p: f.p });
   if(r.path && host && host.showItem) host.showItem(r.path);
@@ -1207,7 +1315,9 @@ async function toGallery(files, model, kind, prompt, job){
   try{ const r = await api("/easy/gallery/add", { files, model, kind, prompt, job: job || "" }); if(r.files && r.files.length) return r.files; }catch(e){}
   return files;
 }
-$("#go").onclick = generate;
+$("#go").onclick = () => startGenerate();
+let galSearchT = null;
+$("#galSearch").oninput = () => { clearTimeout(galSearchT); galSearchT = setTimeout(loadGallery, 250); };
 $("#again").onclick = () => {
   if(state.compute[state.kind] === "cloud"){ $("#cSeedRand").checked = true; $("#cSeed").disabled = true; cloudGenerate(); return; }
   $("#seedRand").checked = true; $("#seed").disabled = true; generate();
@@ -1373,7 +1483,8 @@ function renderGpuBar(){
     ${i.needs_update ? `<button class="btn" type="button" id="gpuUpd" ${small}>⬆ Cloud-GPU auf ${esc(i.version)} aktualisieren</button>` : ""}
     ${isOn(i.stage) ? `<button class="btn" type="button" id="gpuPause" ${small}>⏸ Pausieren</button>` : ["PAUSED", "SLEEPING", "STOPPED"].includes(i.stage) ? `<button class="btn" type="button" id="gpuStart" ${small}>▶ Starten</button>` : ""}
     <button class="btn" type="button" id="gpuRef" ${small} title="Aktualisieren">↻</button>
-    <label class="row hint" style="gap:6px;color:var(--text);cursor:pointer" title="Für „Ich gehe kurz weg“: Sobald alle Videos fertig und abgeholt sind, wird die Cloud-GPU sofort pausiert. Danach ist der Haken wieder aus."><input type="checkbox" id="gpuAuto" ${pauseAfter() ? "checked" : ""}> <span>☕ Pausieren, wenn die Warteschlange fertig ist</span></label></div>
+    <label class="row hint" style="gap:6px;color:var(--text);cursor:pointer" title="Für „Ich gehe kurz weg“: Sobald alle Videos fertig und abgeholt sind, wird die Cloud-GPU sofort pausiert. Danach ist der Haken wieder aus."><input type="checkbox" id="gpuAuto" ${pauseAfter() ? "checked" : ""}> <span>☕ Pausieren, wenn die Warteschlange fertig ist</span></label>
+    <button class="btn" type="button" id="gpuStore" ${small} title="${esc(T("Modelle dauerhaft speichern, damit die Cloud-GPU schneller startet"))}">⚡ ${esc(T("Schnellstart"))}: ${esc(T(gpu.store && gpu.store.on ? "an" : "aus"))}</button></div>
     <div class="row" id="gpuMoney" style="flex-wrap:wrap;gap:8px;margin-top:6px">${gpuMoneyHtml()}</div>`}`;
   el.querySelectorAll("[data-slot]").forEach(b => b.onclick = () => pickGpu(+b.dataset.slot));
   $("#gpuAdd").onclick = () => { gpu.adding = true; renderStudio(); };
@@ -1381,9 +1492,44 @@ function renderGpuBar(){
   bindGpuMoney();
   if($("#gpuPause")) $("#gpuPause").onclick = () => rentedAction(i.id, "pause");
   if($("#gpuStart")) $("#gpuStart").onclick = () => rentedAction(i.id, "start");
+  $("#gpuStore").onclick = () => storageDialog();
+  if(!gpu.store){ gpu.store = {}; api("/easy/cloud/comfy/storage").then(j => { gpu.store = j || {}; if(state.compute[state.kind] === "gpu") renderGpuBar(); }); }
   $("#gpuAuto").onchange = e => { setPauseAfter(e.target.checked); if(e.target.checked) (gpu.list || []).forEach(g => maybeAutoPause(g.B)); else { autoPauseArmed.forEach(b => clearTimeout(autoPauseT[b])); autoPauseArmed.clear(); } };   // greift, wenn der letzte Auftrag einer GPU fertig ist
   $("#gpuRef").onclick = async () => { gpu.list = null; renderGpuBar(); refreshGpuMoney(true); };
   if($("#gpuUpd")) $("#gpuUpd").onclick = async () => { $("#gpuUpd").disabled = true; const r = await api("/easy/cloud/comfy/update", { slot: i.slot }); if(r.error) toast("❌ " + esc(r.error), "err"); else toast("✅ " + esc(T("Wird aktualisiert – die Cloud-GPU richtet sich in einigen Minuten neu ein.")), "ok"); gpu.list = null; renderGpuBar(); };
+}
+// ⚡ Schnellstart-Speicher: Modelle dauerhaft im eigenen (privaten) HF-Speicher, kein erneuter Download bei jedem Start
+async function storageDialog(){
+  const m = $("#modal"), c = $("#modalCard");
+  c.innerHTML = `<h3>⚡ ${esc(T("Schnellstart-Speicher für die Cloud-GPU"))}</h3><div class="hint">${esc(T("Lade …"))}</div>`;
+  m.classList.remove("hidden");
+  const st = await api("/easy/cloud/comfy/storage"); gpu.store = st || {};
+  const used = st.size != null ? GBf(st.size) : "–", acct = cloud.acct || {}, pro = acct.user && acct.user.isPro, incl = pro ? "1 TB" : "100 GB";
+  c.innerHTML = `<h3>⚡ ${esc(T("Schnellstart-Speicher für die Cloud-GPU"))}</h3>
+    <p class="hint" style="margin:0 0 8px"><span>Ohne Schnellstart lädt jede Cloud-GPU bei jedem Start die Modelle neu aus dem Netz – das dauert einige Minuten, die mitbezahlt werden.</span></p>
+    <p class="hint" style="margin:0 0 8px"><span>Mit Schnellstart legt Easy Generate in deinem Hugging-Face-Konto einen privaten Speicher an („eg-models“) und bindet ihn in alle deine Cloud-GPUs ein. Die Modelle werden dort einmal gespeichert; danach findet jede GPU sie beim Start sofort.</span></p>
+    <div class="msg ok" style="margin:8px 0"><span>Privater Speicher ist bei Hugging Face inklusive:</span> <b>${incl}</b> <span>(${esc(T(pro ? "PRO-Konto" : "kostenloses Konto"))})</span>. <span>Darüber hinaus berechnet Hugging Face Speicher extra.</span></div>
+    <div class="kv"><span>${esc(T("Status"))}</span><span><b>${esc(T(st.on ? "an" : "aus"))}</b></span></div>
+    <div class="kv"><span>${esc(T("Belegt im Speicher"))}</span><span>${used}${st.files != null ? ` · ${st.files} ${esc(T("Dateien"))}` : ""}</span></div>
+    <p class="hint" style="margin:8px 0 0"><span>Beim Einschalten wird jede Cloud-GPU einmal neu eingerichtet (einige Minuten). Der erste Start danach lädt die Modelle noch einmal – ab dann geht es schnell.</span></p>
+    <div id="stMsg" style="margin-top:8px"></div>
+    <div class="actions" style="margin-top:12px">
+      ${st.on ? `<button class="btn" type="button" id="stOff">${esc(T("Ausschalten (Modelle bleiben gespeichert)"))}</button>` : `<button class="btn pri" type="button" id="stOn">⚡ ${esc(T("Schnellstart einschalten"))}</button>`}
+      ${st.exists ? `<button class="btn danger" type="button" id="stDel">🗑 ${esc(T("Speicher löschen"))}</button>` : ""}
+      <button class="btn" type="button" id="stClose">${esc(T("Schließen"))}</button></div>`;
+  const run = async (action, q) => {
+    if(q && !confirm(q)) return;
+    c.querySelectorAll("button").forEach(b => b.disabled = true); $("#stMsg").innerHTML = `<span class="hint">${esc(T("Einen Moment …"))}</span>`;
+    const r = await api("/easy/cloud/comfy/storage", { action });
+    if(r.error){ $("#stMsg").innerHTML = `<div class="msg err">${esc(cloudErr(r.error))}</div>`; c.querySelectorAll("button").forEach(b => b.disabled = false); return; }
+    gpu.list = null; gpu.store = null; m.classList.add("hidden");
+    toast("⚡ " + esc(T(action === "on" ? "Schnellstart eingeschaltet – die Cloud-GPUs werden einmal neu eingerichtet." : action === "off" ? "Schnellstart ausgeschaltet." : "Speicher gelöscht.")), "ok", 8000);
+    if(state.tab === "video" || state.tab === "image") renderStudio();
+  };
+  if($("#stOn")) $("#stOn").onclick = () => run("on");
+  if($("#stOff")) $("#stOff").onclick = () => run("off");
+  if($("#stDel")) $("#stDel").onclick = () => run("delete", T("Den Speicher mit allen gespeicherten Modellen endgültig löschen?") + "\n\n" + T("Die Cloud-GPUs laden die Modelle dann wieder bei jedem Start."));
+  $("#stClose").onclick = () => m.classList.add("hidden");
 }
 // Guthaben direkt im Studio – mit den Kosten aller gerade laufenden GPUs
 function gpuMoneyHtml(){
@@ -1407,6 +1553,7 @@ function gpuMoneyHtml(){
   } else if(host && host.hfLogin) parts.push(`<button class="btn" type="button" id="gpuLogin" style="font-size:12px;padding:4px 10px">💰 Guthaben anzeigen (bei HuggingFace anmelden)</button>`);
   else parts.push(extLink(HFL.billing, "💰 Guthaben ansehen", "btn"));
   if(us && typeof us.total === "number") parts.push(`<span class="hint"><span>Diesen Monat verbraucht:</span> <b>${usd(us.total)}</b></span>`);
+  if(budgetLimit()) parts.push(`<span class="hint" title="${esc(T("Tageslimit – einstellbar unter ☁️ Cloud"))}">🛑 <span>Heute ca.</span> <b>${usd(spentToday())}</b> / ${usd(budgetLimit())}</span>`);
   parts.push(`<a class="btn" href="${esc(HFL.billing)}" target="_blank" rel="noopener" style="font-size:12px;padding:4px 10px">💳 Aufladen</a>`);
   return parts.join("");
 }
@@ -1643,6 +1790,8 @@ function renderAccount(){
       ${w && (typeof w.balance === "number" || w.loggedIn) && host && host.hfLogout ? `<button class="btn" type="button" id="clLogout">Abmelden</button>` : ""}
       <button class="btn" type="button" id="clTokChange">Schlüssel ändern</button>
     </div>
+    <div class="row" style="gap:8px;margin-top:12px;flex-wrap:wrap"><span>🛑 <span>Tageslimit für Cloud-Kosten:</span></span><input type="number" id="clBudget" min="0" step="1" value="${budgetLimit() || ""}" placeholder="aus" style="width:90px"><span class="hint">$ · <span>heute ca.</span> ${usd(spentToday())}</span></div>
+    <div class="hint" style="margin-top:4px">Ist das Limit erreicht, pausiert Easy Generate alle Cloud-GPUs (Grundlage: Laufzeit der GPUs und dein Guthaben).</div>
     <div id="clTokBox" class="hidden" style="margin-top:10px"><div class="row"><input type="password" id="clTok2" placeholder="hf_…" autocomplete="off"><button class="btn pri" type="button" id="clTokSave2">Speichern</button></div><div id="clTokMsg2" style="margin-top:6px"></div></div>
     <details style="margin-top:14px" ${!st ? "" : ""}><summary>🆓 Gratis-Kontingent deines Kontos nutzen ${st && st.ok ? "✓" : ""}</summary>
       <p class="hint" style="margin:8px 0"><span>Gratis-Spaces sind Programme anderer Leute. Deshalb bekommen sie nie deinen Haupt-Schlüssel, sondern einen eigenen Schlüssel ohne Rechte.</span> <span>Der zeigt HuggingFace nur, wer du bist, damit dein Tageskontingent (${a.zerogpu_min || 5} Min. GPU) gilt.</span> <span>Ohne diesen Schlüssel funktionieren die Spaces trotzdem, aber mit kleinerem Gast-Kontingent.</span></p>
@@ -1658,6 +1807,7 @@ function renderAccount(){
     </details>`;
   $("#clRefresh").onclick = async () => { $("#clRefresh").disabled = true; await loadAccount(true); renderCloud(); };
   $("#clTokChange").onclick = () => $("#clTokBox").classList.toggle("hidden");
+  $("#clBudget").onchange = e => { const v = Math.max(0, +e.target.value || 0); store.set("budgetDay", v); const sp = spendState(); if(spentToday() < v) sp.hit = false; store.set("spend", sp); toast(v ? "🛑 " + esc(T(`Tageslimit: ${usd(v)} pro Tag`)) : esc(T("Tageslimit ausgeschaltet.")), "ok", 3000); };
   $("#clTokSave2").onclick = async () => { if(await saveToken("hf_token", $("#clTok2").value, $("#clTokMsg2"))){ await loadAccount(true); renderCloud(); } };
   $("#clSTokSave").onclick = async () => { if(await saveToken("hf_space_token", $("#clSTok").value, $("#clSTokMsg"))){ $("#clSTok").value = ""; await loadAccount(true); renderCloud(); } };
   if($("#clLogin")) $("#clLogin").onclick = async () => { const ok = await host.hfLogin(); $("#clLogin").disabled = true; $("#clLogin").textContent = "Lese Guthaben …"; cloud.wallet = await host.hfWallet(); renderCloud(); };
@@ -2377,8 +2527,10 @@ async function loadGallery(){
     ? `<span>🗑 Keine Galerie – Ergebnisse werden nach ${gal.temp_hours} Std. gelöscht.</span> <button class="btn" type="button" onclick="gallerySetup(true)">Ändern</button>`
     : `<span>📂 Gespeichert in:</span> <code>${esc(gal.dir)}</code> <span class="hint">· ${all.length} Dateien · ${GBf(gal.total || 0)}</span> ${host && host.openFolder ? `<button class="btn" type="button" id="galOpen">Ordner öffnen</button>` : ""}<button class="btn" type="button" onclick="gallerySetup(true)">Ändern</button>`;
   if($("#galOpen")) $("#galOpen").onclick = () => host.openFolder(gal.dir);
-  chips($("#galFilter"), [["all", { n: "Alle" }], ["video", { n: "Videos" }], ["image", { n: "Bilder" }]], galKind, k => { galKind = k; loadGallery(); });
-  const byKind = all.filter(f => galKind === "all" || f.kind === galKind || (galKind === "video") === isVideo(f) && !f.kind);
+  chips($("#galFilter"), [["all", { n: "Alle" }], ["video", { n: "Videos" }], ["image", { n: "Bilder" }], ["fav", { n: "⭐ Favoriten" }]], galKind, k => { galKind = k; loadGallery(); });
+  const q = ($("#galSearch").value || "").trim().toLowerCase();
+  const byKind = all.filter(f => (galKind === "all" || (galKind === "fav" ? f.fav : f.kind === galKind || (galKind === "video") === isVideo(f) && !f.kind))
+    && (!q || [f.prompt, f.model, f.name].some(x => String(x || "").toLowerCase().includes(q))));
   const models = {};
   for(const f of byKind) models[f.model] = (models[f.model] || 0) + 1;
   const latest = {};
@@ -2387,7 +2539,7 @@ async function loadGallery(){
   if(galModel !== "all" && !models[galModel]) galModel = "all";
   chips($("#galModels"), [["all", { n: "Alle Modelle", sub: String(byKind.length) }]].concat(names.map(n => [n, { n, sub: String(models[n]) }])), galModel, m => { galModel = m; store.set("galModel", m); loadGallery(); });
   g.innerHTML = "";
-  if(!byKind.length){ g.innerHTML = `<div class="hint">Noch nichts erstellt.</div>`; return; }
+  if(!byKind.length){ $("#galWrap").innerHTML = ""; g.innerHTML = `<div class="hint">${esc(T(q || galKind === "fav" ? "Nichts gefunden." : "Noch nichts erstellt."))}</div>`; return; }
   const groups = galModel === "all" ? names : [galModel];
   const wrap = $("#galWrap"); wrap.innerHTML = "";
   for(const m of groups){
@@ -2400,8 +2552,11 @@ async function loadGallery(){
       it.appendChild(mediaEl(f, true));
       if(f.prompt) it.title = f.prompt;
       const meta = document.createElement("div"); meta.className = "meta";
-      meta.innerHTML = `<span class="nm">${f.cloud ? "☁️ " : ""}${esc(fmtDate(f.created))}</span><span class="ac">${host && host.showItem ? `<button type="button" title="Im Ordner zeigen">📂</button>` : ""}<a href="${dlUrl(f)}" download="${esc(f.name)}" title="Herunterladen">⬇</a><button type="button" title="Löschen">🗑</button></span>`;
-      const bs = meta.querySelectorAll("button");
+      meta.innerHTML = `<span class="nm">${f.cloud ? "☁️ " : ""}${esc(fmtDate(f.created))}</span><span class="ac"><button type="button" class="fav ${f.fav ? "on" : ""}" data-fav title="Favorit">${f.fav ? "★" : "☆"}</button>${isVideo(f) ? `<button type="button" data-cont title="Weiter: letztes Bild als Start für das nächste Video">➕</button>` : ""}${host && host.showItem ? `<button type="button" title="Im Ordner zeigen">📂</button>` : ""}<a href="${dlUrl(f)}" download="${esc(f.name)}" title="Herunterladen">⬇</a><button type="button" title="Löschen">🗑</button></span>`;
+      const fb = meta.querySelector("[data-fav]");
+      fb.onclick = async () => { const r = await api("/easy/gallery/fav", { r: f.r, p: f.p, fav: !f.fav }); if(!r.error){ f.fav = r.fav; fb.classList.toggle("on", f.fav); fb.textContent = f.fav ? "★" : "☆"; } };
+      if(meta.querySelector("[data-cont]")) meta.querySelector("[data-cont]").onclick = () => continueFrom(f, f.prompt || "");
+      const bs = meta.querySelectorAll("button:not([data-fav]):not([data-cont])");
       if(host && host.showItem) bs[0].onclick = () => showInFolder(f);
       bs[bs.length - 1].onclick = async () => {
         if(!confirm(T("Diese Datei endgültig löschen?") + "\n" + f.name)) return;
@@ -2710,6 +2865,7 @@ const gb = v => (v / 1073741824).toFixed(1);
 async function pollSys(){
   try{
     const s = await (await fetch("/easy/sysinfo", { cache: "no-store" })).json();
+    state.sys = s;
     if(s.cpu != null){ hist.cpu.push(s.cpu); $("#mCpu").textContent = pct(s.cpu); spark("#sCpu", hist.cpu); }
     if(s.ram_total){ const p = s.ram_used / s.ram_total * 100; hist.ram.push(p); $("#mRam").textContent = pct(p); $("#mRamS").textContent = `${gb(s.ram_used)} / ${gb(s.ram_total)} GB`; spark("#sRam", hist.ram); }
     if(s.gpu != null){ hist.gpu.push(s.gpu); $("#mGpu").textContent = pct(s.gpu); spark("#sGpu", hist.gpu); }

@@ -1156,9 +1156,13 @@ async def cloud_rented_action(request):
 
 @routes.post("/easy/cloud/pause_all")
 async def cloud_pause_all(request):
-    """Wird beim Beenden von Easy Generate aufgerufen (falls eingestellt)."""
+    """Wird beim Beenden von Easy Generate aufgerufen (falls eingestellt) – oder beim Erreichen des Tageslimits (force)."""
+    try:
+        data = await request.json() if request.can_read_body else {}
+    except Exception:
+        data = {}
     st = cstate()
-    if not st.get("pause_on_exit", True) or not token():
+    if not ((data or {}).get("force") or st.get("pause_on_exit", True)) or not token():
         return web.json_response({"paused": 0})
     n = 0
     for x in st.get("rented", []):
