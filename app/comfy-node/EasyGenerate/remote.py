@@ -26,7 +26,7 @@ SPACE_NAME = "eg-comfyui"
 MAX_SLOTS = 20
 # Nur erhoehen, wenn sich etwas aendert, das auf der Cloud-GPU selbst laufen muss
 # (dann wird dort ein Update angeboten). 2 = Fortschritt per /easy/progress.
-REMOTE_API = 4          # 3 = Schnellstart-Speicher (/data); 4 = Modelle beim Start auf die lokale Platte kopieren
+REMOTE_API = 5          # 3 = Schnellstart-Speicher (/data); 4 = Modelle beim Start auf die lokale Platte kopieren; 5 = Zeitlimit/Platzpruefung beim Kopieren
 BUCKET_NAME = "eg-models"
 
 DOCKERFILE = """FROM python:3.12-slim
