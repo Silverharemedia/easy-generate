@@ -289,6 +289,21 @@ async def _set_volumes(sid, on, bid):
                 raise
 
 
+async def _is_off(sid):
+    try:
+        rt = await hf("GET", f"/api/spaces/{sid}/runtime", timeout=15)
+        return str(rt.get("stage") or "").upper() in ("PAUSED", "SLEEPING", "STOPPED")
+    except Exception:
+        return False
+
+
+async def _keep_off(sid):
+    try:
+        await hf("POST", f"/api/spaces/{sid}/pause", timeout=15)
+    except Exception:
+        pass
+
+
 @routes.get("/easy/cloud/comfy/storage")
 async def comfy_storage_info(request):
     st = cstate()
@@ -323,6 +338,7 @@ async def comfy_storage(request):
                     raise
             files = program_files()
             for x in comfy_entries():
+                was_off = await _is_off(x["id"])
                 if int(x.get("api") or 1) < REMOTE_API:          # Startskript mit /data-Unterstuetzung aufspielen
                     await commit_files(x["id"], files, f"Easy Generate {VERSION}")
                     st = cstate(); e = _rented_entry(st, x["id"])
@@ -330,10 +346,15 @@ async def comfy_storage(request):
                         e["version"], e["api"] = VERSION, REMOTE_API
                         save_cstate(st)
                 await _set_volumes(x["id"], True, bid)
+                if was_off:          # eine pausierte GPU bleibt pausiert (kein ungewollter, bezahlter Start)
+                    await _keep_off(x["id"])
             st = cstate(); st["model_store"] = True; save_cstate(st)
         elif act in ("off", "delete"):
             for x in comfy_entries():
+                was_off = await _is_off(x["id"])
                 await _set_volumes(x["id"], False, bid)
+                if was_off:
+                    await _keep_off(x["id"])
             st = cstate(); st["model_store"] = False; save_cstate(st)
             if act == "delete":
                 try:

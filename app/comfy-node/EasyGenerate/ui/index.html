@@ -108,7 +108,9 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
 .gsec{margin:18px 0 8px;display:flex;align-items:baseline;gap:10px}.gsec h3{margin:0;font-size:15px}
 .gal .meta .ac{display:flex;gap:8px;flex:none}.gal .meta .ac a,.gal .meta .ac button{background:none;border:0;color:var(--accent2);cursor:pointer;padding:0;font-size:12px;text-decoration:none}
 .gal .meta .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gal .meta .ac .fav{color:var(--muted)} .gal .meta .ac .fav.on{color:#ffc53d}
+.gal .it{position:relative}
+.gal .favx{position:absolute;top:6px;right:6px;z-index:2;width:34px;height:34px;border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:20px;line-height:34px;text-align:center;cursor:pointer;padding:0}
+.gal .favx:hover{background:rgba(0,0,0,.8);color:#ffc53d}.gal .favx.on{color:#ffc53d}
 .gopt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-top:8px;cursor:pointer}.gopt.act{border-color:var(--accent);background:#2a1b16}
 .mc2 .spec{color:var(--text);opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mc2 svg{width:100%;height:38px;display:block;margin-top:6px}
@@ -1484,7 +1486,7 @@ function renderGpuBar(){
     ${isOn(i.stage) ? `<button class="btn" type="button" id="gpuPause" ${small}>⏸ Pausieren</button>` : ["PAUSED", "SLEEPING", "STOPPED"].includes(i.stage) ? `<button class="btn" type="button" id="gpuStart" ${small}>▶ Starten</button>` : ""}
     <button class="btn" type="button" id="gpuRef" ${small} title="Aktualisieren">↻</button>
     <label class="row hint" style="gap:6px;color:var(--text);cursor:pointer" title="Für „Ich gehe kurz weg“: Sobald alle Videos fertig und abgeholt sind, wird die Cloud-GPU sofort pausiert. Danach ist der Haken wieder aus."><input type="checkbox" id="gpuAuto" ${pauseAfter() ? "checked" : ""}> <span>☕ Pausieren, wenn die Warteschlange fertig ist</span></label>
-    <button class="btn" type="button" id="gpuStore" ${small} title="${esc(T("Modelle dauerhaft speichern, damit die Cloud-GPU schneller startet"))}">⚡ ${esc(T("Schnellstart"))}: ${esc(T(gpu.store && gpu.store.on ? "an" : "aus"))}</button></div>
+    <label class="row hint" style="gap:6px;color:var(--text);cursor:pointer" title="${esc(T("Modelle dauerhaft speichern, damit die Cloud-GPU schneller startet"))}"><input type="checkbox" id="gpuStoreChk" ${gpu.store && gpu.store.on ? "checked" : ""} ${gpu.storeBusy ? "disabled" : ""}> <span>⚡ ${esc(T("Schnellstart: Modelle im Hugging-Face-Speicher behalten"))}</span></label><button class="btn" type="button" id="gpuStore" ${small} title="${esc(T("Schnellstart-Speicher für die Cloud-GPU"))}">ℹ</button></div>
     <div class="row" id="gpuMoney" style="flex-wrap:wrap;gap:8px;margin-top:6px">${gpuMoneyHtml()}</div>`}`;
   el.querySelectorAll("[data-slot]").forEach(b => b.onclick = () => pickGpu(+b.dataset.slot));
   $("#gpuAdd").onclick = () => { gpu.adding = true; renderStudio(); };
@@ -1493,6 +1495,16 @@ function renderGpuBar(){
   if($("#gpuPause")) $("#gpuPause").onclick = () => rentedAction(i.id, "pause");
   if($("#gpuStart")) $("#gpuStart").onclick = () => rentedAction(i.id, "start");
   $("#gpuStore").onclick = () => storageDialog();
+  $("#gpuStoreChk").onchange = async e => {
+    const on = e.target.checked;
+    if(on && !confirm(T("Schnellstart einschalten?") + "\n\n" + T("Die Modelle werden in einem privaten Speicher in deinem Hugging-Face-Konto behalten (bis 100 GB inklusive, mit PRO 1 TB). Jede Cloud-GPU wird dafür einmal neu eingerichtet; pausierte GPUs bleiben pausiert."))){ e.target.checked = false; return; }
+    gpu.storeBusy = true; e.target.disabled = true;
+    const r = await api("/easy/cloud/comfy/storage", { action: on ? "on" : "off" });
+    gpu.storeBusy = false;
+    if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); e.target.checked = !on; e.target.disabled = false; return; }
+    toast("⚡ " + esc(T(on ? "Schnellstart eingeschaltet – die Cloud-GPUs werden einmal neu eingerichtet." : "Schnellstart ausgeschaltet.")), "ok", 8000);
+    gpu.list = null; gpu.store = null; renderGpuBar();
+  };
   if(!gpu.store){ gpu.store = {}; api("/easy/cloud/comfy/storage").then(j => { gpu.store = j || {}; if(state.compute[state.kind] === "gpu") renderGpuBar(); }); }
   $("#gpuAuto").onchange = e => { setPauseAfter(e.target.checked); if(e.target.checked) (gpu.list || []).forEach(g => maybeAutoPause(g.B)); else { autoPauseArmed.forEach(b => clearTimeout(autoPauseT[b])); autoPauseArmed.clear(); } };   // greift, wenn der letzte Auftrag einer GPU fertig ist
   $("#gpuRef").onclick = async () => { gpu.list = null; renderGpuBar(); refreshGpuMoney(true); };
@@ -2552,9 +2564,10 @@ async function loadGallery(){
       it.appendChild(mediaEl(f, true));
       if(f.prompt) it.title = f.prompt;
       const meta = document.createElement("div"); meta.className = "meta";
-      meta.innerHTML = `<span class="nm">${f.cloud ? "☁️ " : ""}${esc(fmtDate(f.created))}</span><span class="ac"><button type="button" class="fav ${f.fav ? "on" : ""}" data-fav title="Favorit">${f.fav ? "★" : "☆"}</button>${isVideo(f) ? `<button type="button" data-cont title="Weiter: letztes Bild als Start für das nächste Video">➕</button>` : ""}${host && host.showItem ? `<button type="button" title="Im Ordner zeigen">📂</button>` : ""}<a href="${dlUrl(f)}" download="${esc(f.name)}" title="Herunterladen">⬇</a><button type="button" title="Löschen">🗑</button></span>`;
-      const fb = meta.querySelector("[data-fav]");
-      fb.onclick = async () => { const r = await api("/easy/gallery/fav", { r: f.r, p: f.p, fav: !f.fav }); if(!r.error){ f.fav = r.fav; fb.classList.toggle("on", f.fav); fb.textContent = f.fav ? "★" : "☆"; } };
+      meta.innerHTML = `<span class="nm">${f.cloud ? "☁️ " : ""}${esc(fmtDate(f.created))}</span><span class="ac">${isVideo(f) ? `<button type="button" data-cont title="Weiter: letztes Bild als Start für das nächste Video">➕</button>` : ""}${host && host.showItem ? `<button type="button" title="Im Ordner zeigen">📂</button>` : ""}<a href="${dlUrl(f)}" download="${esc(f.name)}" title="Herunterladen">⬇</a><button type="button" title="Löschen">🗑</button></span>`;
+      const fb = document.createElement("button"); fb.type = "button"; fb.className = "favx" + (f.fav ? " on" : ""); fb.textContent = f.fav ? "★" : "☆";
+      fb.title = T(f.fav ? "Aus den Favoriten entfernen" : "Zu den Favoriten"); it.appendChild(fb);
+      fb.onclick = async ev => { ev.stopPropagation(); const r = await api("/easy/gallery/fav", { r: f.r, p: f.p, fav: !f.fav }); if(!r.error){ f.fav = r.fav; fb.classList.toggle("on", f.fav); fb.textContent = f.fav ? "★" : "☆"; fb.title = T(f.fav ? "Aus den Favoriten entfernen" : "Zu den Favoriten"); if(galKind === "fav" && !f.fav) loadGallery(); } };
       if(meta.querySelector("[data-cont]")) meta.querySelector("[data-cont]").onclick = () => continueFrom(f, f.prompt || "");
       const bs = meta.querySelectorAll("button:not([data-fav]):not([data-cont])");
       if(host && host.showItem) bs[0].onclick = () => showInFolder(f);
