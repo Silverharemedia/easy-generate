@@ -418,6 +418,7 @@ function createWindow() {
     closing = true; winClosing = true;
     let close = cfg.closeMode === "always";
     const running = cfg.comfy && await comfyAt(cfg.comfy.port);
+    const pausing = running ? pauseRented() : Promise.resolve();   // sofort anfangen (alle GPUs gleichzeitig), nicht erst nach der Frage
     if (running && cfg.closeMode === "ask") {
       const T = {
         de: { b: ["Ja, schließen", "Nein, weiterlaufen lassen"], m: "Soll ComfyUI auch geschlossen werden?", d: "Das gibt den Grafikspeicher wieder frei. Lässt du es laufen, startet Easy Generate beim nächsten Mal schneller.", c: "Nicht mehr fragen – ComfyUI immer automatisch schließen" },
@@ -442,10 +443,10 @@ function createWindow() {
     }
     // Aufräumen mit Zeitlimit – hängt etwas (z. B. nach einem Grafiktreiber-Absturz), wird trotzdem beendet
     const cleanup = (async () => {
-      if (running) await pauseRented();
+      await pausing;
       if (running && close) await killComfy();
     })();
-    await Promise.race([cleanup, sleep(15000)]);
+    await Promise.race([cleanup, sleep(25000)]);
     forceQuit();
   });
   // Reagiert die Oberfläche nicht mehr (z. B. Grafiktreiber abgestürzt), kann man trotzdem schließen
@@ -577,7 +578,7 @@ async function pauseRented() {
   // Gemietete GPUs (eigene Spaces) beim Beenden pausieren, damit keine Kosten weiterlaufen.
   if (!cfg.comfy || !cfg.comfy.port) return;
   await new Promise(resolve => {
-    const req = http.request({ host: "127.0.0.1", port: cfg.comfy.port, path: "/easy/cloud/pause_all", method: "POST", headers: { "Content-Type": "application/json" }, timeout: 8000 }, res => { res.resume(); res.on("end", resolve); });
+    const req = http.request({ host: "127.0.0.1", port: cfg.comfy.port, path: "/easy/cloud/pause_all", method: "POST", headers: { "Content-Type": "application/json" }, timeout: 22000 }, res => { res.resume(); res.on("end", resolve); });
     req.on("error", resolve); req.on("timeout", () => { req.destroy(); resolve(); });
     req.end("{}");
   });

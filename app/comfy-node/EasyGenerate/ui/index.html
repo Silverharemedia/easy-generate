@@ -872,13 +872,16 @@ async function budgetTick(){
   const w = cloud.wallet && typeof cloud.wallet.balance === "number" ? cloud.wallet.balance : null;
   if(w != null && sp.w0 == null) sp.w0 = w;
   if(lim || (gpu.list || []).some(e => isOn(e.stage))){
+    if(!cloud.hw || !cloud.hw.length){ try{ cloud.hw = (await api("/easy/cloud/hardware")).items || []; }catch(e){} }   // ohne Preise wäre die Schätzung 0
     try{ const j = await api("/easy/cloud/comfy/list"); if(j && Array.isArray(j.items)){ gpu.list = j.items; } }catch(e){}
     for(const e of gpu.list || []) if(isOn(e.stage)) sp.est = (sp.est || 0) + (hwOf(e).per_hour || 0) / 60;
   }
   store.set("spend", sp);
   if(lim && !sp.hit && spentToday() >= lim){
-    sp.hit = true; store.set("spend", sp);
-    await api("/easy/cloud/pause_all", { force: true });
+    let r = null;
+    try{ r = await api("/easy/cloud/pause_all", { force: true }); }catch(e){}
+    if(!r || r.error || r.failed){ toast("❌ " + esc(T("Tageslimit erreicht, aber die Cloud-GPUs ließen sich nicht pausieren – bitte selbst pausieren. Neuer Versuch in 1 Min.")), "err", 30000); return; }
+    sp.hit = true; store.set("spend", sp);       // erst nach erfolgreichem Pausieren als erledigt merken
     (gpu.list || []).forEach(g => dropLane(g.B, "Abgebrochen."));
     toast("🛑 " + esc(T(`Tageslimit von ${usd(lim)} erreicht – alle Cloud-GPUs wurden pausiert.`)), "warn", 20000);
     gpu.list = null; if(state.tab === "video" || state.tab === "image") renderStudio();
@@ -1143,19 +1146,28 @@ async function restoreJobs(){
   const doneIds = new Set(state.done.map(d => d.id));
   const lanes = [...new Set(saved.map(j => j.B || ""))];
   // je Rechner einmal die Warteschlange abfragen (parallel)
-  const queues = {};
-  await Promise.all(lanes.map(async B => { try{ queues[B] = await api(B + "/queue"); }catch(e){ queues[B] = null; } }));
+  const queues = {}, off = new Set();
+  await Promise.all(lanes.map(async B => {
+    if(B){   // erst bei HF nachsehen – eine Anfrage an eine schlafende GPU würde sie (bezahlt) wecken
+      const i = await api("/easy/cloud/comfy/info?slot=" + slotOfB(B)).catch(() => null);
+      if(i && (i.exists === false || ["PAUSED", "SLEEPING", "STOPPED", "GONE", "BUILDING", "APP_STARTING", "RUNNING_BUILDING", "RUNNING_APP_STARTING"].includes(i.stage))){ off.add(B); return; }
+    }
+    try{ queues[B] = await api(B + "/queue"); }catch(e){ queues[B] = null; }
+  }));
   const keep = [], refetch = [];
+  let lostN = 0;
   for(const j of saved){
     const B = j.B || "";
     if(doneIds.has(j.id)) continue;                                                     // schon fertig einsortiert
     if(B && gpu.list && !gpuEntry(B)) continue;                                         // diese GPU gibt es nicht mehr
+    if(off.has(B)){ lostN++; continue; }                                                // GPU ist aus / neu gestartet: Auftrag ist dort weg
     const q = queues[B], has = arr => (arr || []).some(e => e && e[1] === j.id);
     if(q && !q.error && (has(q.queue_running) || has(q.queue_pending))){ keep.push(j); continue; }
     if(!q || q.error){ keep.push(j); continue; }                                        // Server gerade nicht erreichbar – nicht verwerfen
     try{ const h = await api(B + "/history/" + j.id); if(h && h[j.id]) (j.fetch ? refetch : keep).push(j); }catch(e){ keep.push(j); }
   }
   state.restoring = null;
+  if(lostN) toast("📋 " + esc(T(`${lostN} Aufträge entfernt – die Cloud-GPU war inzwischen aus oder wurde neu gestartet.`)), "warn", 10000);
   for(const j of keep){
     if([...state.runs, ...state.queue].some(x => x.id === j.id)) continue;
     j.fetch = false;
@@ -1192,21 +1204,27 @@ function maybeAutoPause(B){
   if(!B || !(pauseAfter() || autoPauseArmed.has(B)) || gpuBusy(B)) return;
   clearTimeout(autoPauseT[B]); autoPauseArmed.add(B);
   autoPauseT[B] = setTimeout(async () => {
+    let retry = false;      // konnte (noch) nicht pausieren -> in 30 s nochmal versuchen, solange ☕ an ist
     try{
       if(gpuBusy(B)) return;   // inzwischen neuer Auftrag? Dann nicht pausieren
       const info = await api("/easy/cloud/comfy/info?slot=" + slotOfB(B)).catch(() => null);
-      if(!info || !info.id || info.stage !== "RUNNING") return;      // nur eine fertig laufende GPU – nicht beim Einrichten/Starten
+      if(!info || !info.id){ retry = true; return; }
+      if(["PAUSED", "SLEEPING", "STOPPED"].includes(info.stage)) return;   // ist schon aus
+      if(info.stage !== "RUNNING"){ retry = true; return; }              // startet/wird eingerichtet – später nochmal
       const q = await api(B + "/queue").catch(() => null);            // auch der Server selbst muss leer sein
-      if(!q || q.error || (q.queue_running || []).length || (q.queue_pending || []).length) return;
+      if(!q || q.error || (q.queue_running || []).length || (q.queue_pending || []).length){ retry = true; return; }
       if(gpuBusy(B) || !autoPauseArmed.has(B)) return;   // nach dem Warten nochmal prüfen (oder von Hand abgeschaltet)
       const r = await api("/easy/cloud/rented/pause", { space: info.id });
-      if(r.error){ toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
+      if(r.error){ retry = true; toast("❌ " + esc(cloudErr(r.error)), "err"); return; }
       // Hat keine andere GPU mehr Arbeit (und keine wartet aufs Pausieren), ist der Haken erledigt und geht wieder aus
       const last = !(gpu.list || []).some(g => g.B !== B && (gpuBusy(g.B) || autoPauseArmed.has(g.B)));
       if(last) setPauseAfter(false);
       toast("☕ " + esc((gpu.list.length > 1 ? `GPU ${info.slot}: ` : "") + T("Warteschlange fertig – Cloud-GPU pausiert. Es entstehen keine Kosten mehr.")) + (last ? " " + esc(T("Der Haken ☕ ist jetzt wieder aus.")) : ""), "ok", 10000);
       await loadGpuInfo(); if(state.tab === "video" || state.tab === "image") renderStudio();
-    } finally { autoPauseArmed.delete(B); }
+    } finally {
+      autoPauseArmed.delete(B);
+      if(retry && pauseAfter() && !gpuBusy(B)) setTimeout(() => maybeAutoPause(B), 30000);
+    }
   }, 4000);
 }
 async function finish(run){
@@ -1340,10 +1358,11 @@ $("#stop").onclick = async () => {
 /* ================= Eigene Cloud-GPUs (ComfyUI auf gemieteten Grafikkarten – auch mehrere gleichzeitig) ================= */
 // Fortschritt der Cloud-GPU zuverlässig per HTTP abholen
 async function remoteProgress(run){
-  if(run.rpBusy || Date.now() - (run.rpAt || 0) < 2000) return;
+  if(run.rpBusy || Date.now() - (run.rpAt || 0) < (run.off ? 10000 : 2000)) return;
   run.rpBusy = true; run.rpAt = Date.now();
   const alive = () => state.runs.includes(run) && !run.finished;
   try{
+    if(run.off) throw 0;      // GPU ist nicht bereit: nicht direkt anfragen (würde eine schlafende GPU wecken)
     const j = await api(run.B + "/easy/progress?since=" + (run.rpSeq || 0));
     if(!alive()) return;
     if(run.rpSeq == null){ run.rpSeq = j.seq || 0; }    // erster Abruf: nur Startpunkt merken
@@ -1353,12 +1372,21 @@ async function remoteProgress(run){
     }
   }catch(e){}
   finally{ run.rpBusy = false; }
-  if(alive() && (!run.poll || Date.now() - run.poll > 6000)){ run.poll = Date.now(); pollDone(run); }
+  if(alive() && !run.off && (!run.poll || Date.now() - run.poll > 6000)){ run.poll = Date.now(); pollDone(run); }
   // Hat die Cloud-GPU den Auftrag verloren (neu gestartet, pausiert, gelöscht)? Dann nicht ewig warten.
   if(alive() && Date.now() - (run.qAt || run.start) > 20000){
     run.qAt = Date.now();
     const LOST = "Die Cloud-GPU hat den Auftrag nicht mehr (vermutlich neu gestartet oder pausiert). Bitte nochmal erstellen.";
     try{
+      // zuerst bei HF nachsehen, ob die GPU überhaupt läuft (ohne sie zu wecken)
+      const i = await api("/easy/cloud/comfy/info?slot=" + slotOfB(run.B)).catch(() => null);
+      if(i && i.exists === false){ dropLane(run.B, "Diese Cloud-GPU gibt es nicht mehr."); return; }
+      if(i && i.stage && !["RUNNING", "UNKNOWN", "ERROR"].includes(i.stage)){
+        run.off = true; run.lost = (run.lost || 0) + 1;
+        if(run.lost >= 2 && alive()) dropLane(run.B, i.auto_paused && /hing/.test(i.auto_paused) ? "Der Auftrag kam 40 Minuten nicht voran. Die Cloud-GPU wurde deshalb angehalten und pausiert, damit keine Kosten weiterlaufen." : LOST);
+        return;
+      }
+      run.off = false;
       const q = await api(run.B + "/queue");
       const has = (arr, id) => (arr || []).some(e => e && e[1] === id);
       if(q && !q.error && Array.isArray(q.queue_running)){
@@ -1430,12 +1458,20 @@ async function gpuPrepare(name, B){
     if(!info || !info.exists){ showMsg("warn", "Es ist noch keine Cloud-GPU eingerichtet."); return done(false); }
     if(!info.space_token){ showMsg("err", gpuErr("AUTH")); return done(false); }
     const START = { BUILDING: "Die Cloud-GPU wird eingerichtet (beim ersten Mal ca. 10 Min.) …", RUNNING_BUILDING: "Die Cloud-GPU wird aktualisiert …", APP_STARTING: "Die Cloud-GPU startet …", RUNNING_APP_STARTING: "Die Cloud-GPU startet …" };
-    let woke = false;
+    let woke = false, runSince = 0;
+    const t0 = Date.now();
+    const giveUp = async msg => {        // hängt der Start, die (bezahlte) GPU nicht ewig laufen lassen
+      try{ await api("/easy/cloud/rented/pause", { space: info.id }); }catch(e){}
+      showMsg("err", pre() + T(msg)); return done(false);
+    };
     for(;;){
       if(prep.cancel){ showMsg("warn", pre() + T("Abgebrochen.")); return done(false); }
+      if(Date.now() - t0 > 45 * 60000) return giveUp("Die Cloud-GPU ist nach 45 Minuten noch nicht bereit und wurde pausiert, damit keine Kosten weiterlaufen.");
       if(info.stage === "RUNNING"){
         const v = await api(B + "/easy/version").catch(() => ({}));
         if(v.version) break;
+        runSince = runSince || Date.now();
+        if(Date.now() - runSince > 10 * 60000) return giveUp("Die Cloud-GPU läuft, aber ComfyUI antwortet seit 10 Minuten nicht. Sie wurde pausiert, damit keine Kosten weiterlaufen. Bitte unter 🚀 „aktualisieren“ oder neu starten.");
         say("Die Cloud-GPU startet ComfyUI …");
       } else if(["PAUSED", "SLEEPING", "STOPPED"].includes(info.stage)){
         if(!woke){ await api("/easy/cloud/wake", { space: info.id }); woke = true; }

@@ -972,8 +972,9 @@ async def _wake(sid):
         rt = await hf("GET", f"/api/spaces/{sid}/runtime")
         if rt.get("stage") in ("PAUSED", "SLEEPING", "STOPPED"):
             await hf("POST", f"/api/spaces/{sid}/restart")
+        return True
     except Exception:
-        pass
+        return False
 
 
 @routes.post("/easy/cloud/rent")
@@ -1119,12 +1120,12 @@ async def cloud_rented_action(request):
         if action == "pause":
             await hf("POST", f"/api/spaces/{sid}/pause")
         elif action == "start":
-            await _wake(sid)
-            await hf("POST", f"/api/spaces/{sid}/restart")
+            if not await _wake(sid):          # nur wenn der Zustand unbekannt war – sonst nicht doppelt neu starten
+                await hf("POST", f"/api/spaces/{sid}/restart")
         elif action == "hardware":
             body = {"flavor": str(data.get("hardware"))}
-            if data.get("sleep"):
-                body["sleepTimeSeconds"] = int(data["sleep"])
+            ent = _rented_entry(cstate(), sid) or {}
+            body["sleepTimeSeconds"] = int(data.get("sleep") or ent.get("sleep") or 900)   # Schlafzeit nie verlieren (sonst laeuft sie ewig)
             await hf("POST", f"/api/spaces/{sid}/hardware", body=body)
             st = cstate()
             for x in st["rented"]:
@@ -1164,13 +1165,22 @@ async def cloud_pause_all(request):
     st = cstate()
     if not ((data or {}).get("force") or st.get("pause_on_exit", True)) or not token():
         return web.json_response({"paused": 0})
-    n = 0
-    for x in st.get("rented", []):
+    async def one(x):           # alle GPUs gleichzeitig – beim Beenden bleibt nicht viel Zeit
         try:
-            rt = await hf("GET", f"/api/spaces/{x['id']}/runtime", timeout=8)
-            if rt.get("stage") not in ("PAUSED", "SLEEPING", "STOPPED"):
-                await hf("POST", f"/api/spaces/{x['id']}/pause", timeout=8)
-                n += 1
+            rt = await hf("GET", f"/api/spaces/{x['id']}/runtime", timeout=6)
+            if rt.get("stage") in ("PAUSED", "STOPPED"):
+                return "off"
         except Exception:
-            pass
-    return web.json_response({"paused": n})
+            pass                 # unbekannt: sicherheitshalber pausieren
+        for _ in range(2):
+            try:
+                await hf("POST", f"/api/spaces/{x['id']}/pause", timeout=8)
+                return "paused"
+            except HFError as e:
+                if e.status == 404:
+                    return "off"
+            except Exception:
+                pass
+        return "failed"
+    res = await asyncio.gather(*[one(x) for x in st.get("rented", [])])
+    return web.json_response({"paused": res.count("paused"), "failed": res.count("failed")})

@@ -46,6 +46,7 @@ Updates installiert Easy Generate selbst (Einstellungen → „Nach Updates such
 - **Kosten im Blick:** Guthaben, Verbrauch im Monat und „reicht noch für ≈ X Std.“ direkt im Studio – auch für mehrere laufende GPUs zusammen.
 - 🛑 **Tageslimit:** ab einem selbst gewählten Betrag pro Tag werden alle Cloud-GPUs automatisch pausiert.
 - ⚡ **Schnellstart (optional):** Modelle bleiben in einem privaten Hugging-Face-Speicher und müssen nach dem Aufwachen nicht neu geladen werden (inklusive bis 100 GB, mit PRO 1 TB).
+- 🛡️ **Sicherheitsnetz:** Hängt ein Auftrag (40 Min. ohne Fortschritt), antwortet eine GPU nicht mehr oder startet sie ewig nicht, wird sie automatisch pausiert. Updates und Einstellungen starten pausierte GPUs nie ungewollt.
 - **Spart Geld:** Pausieren/Starten mit einem Klick, automatisches Ausschalten ohne Nutzung, ☕ „Pausieren, wenn die Warteschlange fertig ist“ (für „ich gehe kurz weg“) und ☕ „nach dem Einrichten pausieren“.
 
 ### ☁️ Hugging-Face-Cloud

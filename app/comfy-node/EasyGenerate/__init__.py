@@ -16,7 +16,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.8.8"
+VERSION = "1.8.9"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -541,10 +541,15 @@ async def _download_one(session, m):
 
 # Cloud-GPU mit Schnellstart-Speicher: neu geladene Modelle im Hintergrund dorthin sichern,
 # damit sie beim naechsten Start nicht wieder aus dem Netz geladen werden muessen.
+STORE_UP = {"n": 0}
+
+
 def _store_copy(path):
     store = os.environ.get("EG_MODEL_STORE")
     if not store:
         return
+    STORE_UP["n"] += 1
+
     def run():
         try:
             import folder_paths, socket
@@ -561,6 +566,8 @@ def _store_copy(path):
             print("[Easy Generate] Im Schnellstart-Speicher gesichert:", rel)
         except Exception as e:
             print("[Easy Generate] Schnellstart-Speicher: konnte nicht sichern:", path, e)
+        finally:
+            STORE_UP["n"] -= 1
     import threading
     threading.Thread(target=run, daemon=True).start()
 
@@ -653,7 +660,7 @@ async def easy_models_status(request):
     q = DL["queue"]
     active = [x for x in q if x["status"] in ("queued", "loading")]
     return web.json_response({
-        "running": DL["running"], "speed": DL["speed"], "current": DL["current"], "errors": DL["errors"],
+        "running": DL["running"], "uploading": STORE_UP["n"], "speed": DL["speed"], "current": DL["current"], "errors": DL["errors"],
         "got": sum(x["got"] for x in active), "total": sum(x["size"] for x in active),
         "items": [{k: x.get(k) for k in ("name", "got", "size", "status", "template", "error", "url")} for x in q],
     })

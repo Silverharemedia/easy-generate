@@ -52,8 +52,14 @@ if [ -d /data ] && [ -w /data ]; then
   mkdir -p /data/models
   echo "[Easy Generate] Schnellstart: hole Modelle aus dem Speicher ..."
   python - <<'EOF'
-import os, shutil, time, concurrent.futures as cf
+import os, sys, shutil, time, concurrent.futures as cf
 src, dst = "/data/models", "/home/user/ComfyUI/models"
+DEADLINE = 15 * 60           # laenger nie warten – sonst laeuft die bezahlte GPU nur fuers Kopieren
+for root, _, files in os.walk(dst):          # halbe Kopien vom letzten Mal wegraeumen
+    for f in files:
+        if f.endswith(".cp"):
+            try: os.remove(os.path.join(root, f))
+            except OSError: pass
 jobs = []
 for root, _, files in os.walk(src):
     for f in files:
@@ -61,11 +67,20 @@ for root, _, files in os.walk(src):
             continue
         a = os.path.join(root, f); b = os.path.join(dst, os.path.relpath(a, src))
         try:
-            if os.path.isfile(b) and os.path.getsize(b) == os.path.getsize(a):
+            sa = os.path.getsize(a)
+            if os.path.isfile(b) and os.path.getsize(b) == sa:
                 continue
         except OSError:
             continue
-        jobs.append((a, b))
+        jobs.append((a, b, sa))
+os.makedirs(dst, exist_ok=True)
+free = shutil.disk_usage(dst).free - 20 * 1024 ** 3      # 20 GB Reserve fuer Ergebnisse/neue Modelle
+keep = []
+for a, b, sa in sorted(jobs, key=lambda x: x[2]):
+    if sa <= free:
+        keep.append((a, b)); free -= sa
+if len(keep) < len(jobs):
+    print("[Easy Generate] Schnellstart: zu wenig Platz – %d Dateien bleiben im Speicher" % (len(jobs) - len(keep)), flush=True)
 def cp(ab):
     a, b = ab
     os.makedirs(os.path.dirname(b), exist_ok=True)
@@ -74,14 +89,19 @@ def cp(ab):
     os.replace(b + ".cp", b)
     return os.path.getsize(b)
 t, n = time.time(), 0
-with cf.ThreadPoolExecutor(8) as ex:
-    for fut in cf.as_completed([ex.submit(cp, x) for x in jobs]):
+ex = cf.ThreadPoolExecutor(8)
+futs = [ex.submit(cp, x) for x in keep]
+try:
+    for fut in cf.as_completed(futs, timeout=DEADLINE):
         try:
             n += fut.result()
         except Exception as e:
             print("[Easy Generate] Schnellstart: Fehler", e, flush=True)
+except cf.TimeoutError:
+    print("[Easy Generate] Schnellstart: Zeitlimit erreicht – fehlende Modelle werden normal geladen", flush=True)
+    sys.stdout.flush(); os._exit(0)
 dt = max(time.time() - t, 0.1)
-print("[Easy Generate] Schnellstart: %d Dateien, %.1f GB in %.0f s (%.0f MB/s)" % (len(jobs), n / 1e9, dt, n / dt / 1e6), flush=True)
+print("[Easy Generate] Schnellstart: %d Dateien, %.1f GB in %.0f s (%.0f MB/s)" % (len(keep), n / 1e9, dt, n / dt / 1e6), flush=True)
 EOF
   export EG_MODEL_STORE=/data/models
 fi
@@ -202,6 +222,14 @@ async def comfy_create(request):
         except HFError as e:
             if e.status != 409:
                 raise
+
+        def save_entry():
+            st = cstate()
+            st["rented"] = [x for x in st.get("rented", []) if x["id"] != sid]
+            st["rented"].append({"id": sid, "from": "ComfyUI (Easy Generate)" + (f" · GPU {slot}" if slot > 1 else ""), "kind": "comfy", "slot": slot, "hardware": hw, "sleep": sleep,
+                                 "created": time.time(), "version": VERSION, "api": REMOTE_API, "pause_when_ready": bool(data.get("pause_when_ready"))})
+            save_cstate(st)
+        save_entry()      # sofort merken: schlaegt danach etwas fehl, bleibt die (bezahlte) GPU trotzdem sichtbar und pausierbar
         await commit_files(sid, program_files(), f"Easy Generate {VERSION}")
         try:
             await hf("POST", f"/api/spaces/{sid}/secrets", body={"key": "HF_TOKEN", "value": token()})
@@ -213,11 +241,7 @@ async def comfy_create(request):
             if e.status == 402 or "payment" in e.text.lower() or "credit" in e.text.lower():
                 return web.json_response({"error": "PAYMENT|" + e.text[:300]}, status=400)
             raise
-        st = cstate()
-        st["rented"] = [x for x in st.get("rented", []) if x["id"] != sid]
-        st["rented"].append({"id": sid, "from": "ComfyUI (Easy Generate)" + (f" · GPU {slot}" if slot > 1 else ""), "kind": "comfy", "slot": slot, "hardware": hw, "sleep": sleep,
-                             "created": time.time(), "version": VERSION, "api": REMOTE_API, "pause_when_ready": bool(data.get("pause_when_ready"))})
-        save_cstate(st)
+        save_entry()
         if data.get("pause_when_ready"):
             ensure_watch(sid)
         if cstate().get("model_store"):
@@ -249,7 +273,12 @@ async def comfy_update(request):
     try:
         files = program_files()
         for x in xs:
-            await commit_files(x["id"], files, f"Easy Generate {VERSION}")
+            was_off = await _is_off(x["id"])
+            try:
+                await commit_files(x["id"], files, f"Easy Generate {VERSION}")
+            finally:
+                if was_off:          # pausierte GPU nicht durch das Update starten
+                    await _keep_off(x["id"])
             st = cstate()
             e = _rented_entry(st, x["id"])
             if e:
@@ -266,6 +295,8 @@ async def _info(x):
     out = {"exists": True, "id": x["id"], "slot": slot, "B": base_path(slot), "hardware": x.get("hardware"), "remote_version": x.get("version"),
            "version": VERSION, "space_token": bool(space_token()), "needs_update": int(x.get("api") or 1) < REMOTE_API,
            "sleep": x.get("sleep")}
+    if x.get("auto_paused_why") and time.time() - float(x.get("auto_paused_at") or 0) < 3600:
+        out["auto_paused"] = x["auto_paused_why"]
     try:
         rt = await hf("GET", f"/api/spaces/{x['id']}/runtime")
         out["stage"] = rt.get("stage")
@@ -318,18 +349,38 @@ async def _set_volumes(sid, on, bid):
 
 
 async def _is_off(sid):
-    try:
-        rt = await hf("GET", f"/api/spaces/{sid}/runtime", timeout=15)
-        return str(rt.get("stage") or "").upper() in ("PAUSED", "SLEEPING", "STOPPED")
-    except Exception:
-        return False
+    """Ist die GPU aus? Unbekannt (Fehler) zaehlt sicherheitshalber als aus – lieber einmal zu oft pausieren als bezahlen."""
+    for _ in range(2):
+        try:
+            rt = await hf("GET", f"/api/spaces/{sid}/runtime", timeout=15)
+            return str(rt.get("stage") or "").upper() in ("PAUSED", "SLEEPING", "STOPPED")
+        except Exception:
+            await asyncio.sleep(2)
+    return True
 
 
 async def _keep_off(sid):
-    try:
-        await hf("POST", f"/api/spaces/{sid}/pause", timeout=15)
-    except Exception:
-        pass
+    """Pausieren – und nach kurzer Zeit nachsehen, ob HF die GPU durch die Aenderung doch wieder gestartet hat."""
+    async def once():
+        for _ in range(3):
+            try:
+                await hf("POST", f"/api/spaces/{sid}/pause", timeout=15)
+                return True
+            except Exception:
+                await asyncio.sleep(3)
+        print("[Easy Generate] Achtung: Cloud-GPU konnte nicht pausiert werden:", sid)
+        return False
+    await once()
+
+    async def later():
+        await asyncio.sleep(20)
+        try:
+            rt = await hf("GET", f"/api/spaces/{sid}/runtime", timeout=15)
+            if str(rt.get("stage") or "").upper() not in ("PAUSED", "STOPPED"):
+                await once()
+        except Exception:
+            await once()
+    asyncio.ensure_future(later())
 
 
 @routes.get("/easy/cloud/comfy/storage")
@@ -367,22 +418,26 @@ async def comfy_storage(request):
             files = program_files()
             for x in comfy_entries():
                 was_off = await _is_off(x["id"])
-                if int(x.get("api") or 1) < REMOTE_API:          # Startskript mit /data-Unterstuetzung aufspielen
-                    await commit_files(x["id"], files, f"Easy Generate {VERSION}")
-                    st = cstate(); e = _rented_entry(st, x["id"])
-                    if e:
-                        e["version"], e["api"] = VERSION, REMOTE_API
-                        save_cstate(st)
-                await _set_volumes(x["id"], True, bid)
-                if was_off:          # eine pausierte GPU bleibt pausiert (kein ungewollter, bezahlter Start)
-                    await _keep_off(x["id"])
+                try:
+                    if int(x.get("api") or 1) < REMOTE_API:          # Startskript mit /data-Unterstuetzung aufspielen
+                        await commit_files(x["id"], files, f"Easy Generate {VERSION}")
+                        st = cstate(); e = _rented_entry(st, x["id"])
+                        if e:
+                            e["version"], e["api"] = VERSION, REMOTE_API
+                            save_cstate(st)
+                    await _set_volumes(x["id"], True, bid)
+                finally:
+                    if was_off:          # eine pausierte GPU bleibt pausiert (kein ungewollter, bezahlter Start) – auch bei Fehlern
+                        await _keep_off(x["id"])
             st = cstate(); st["model_store"] = True; save_cstate(st)
         elif act in ("off", "delete"):
             for x in comfy_entries():
                 was_off = await _is_off(x["id"])
-                await _set_volumes(x["id"], False, bid)
-                if was_off:
-                    await _keep_off(x["id"])
+                try:
+                    await _set_volumes(x["id"], False, bid)
+                finally:
+                    if was_off:
+                        await _keep_off(x["id"])
             st = cstate(); st["model_store"] = False; save_cstate(st)
             if act == "delete":
                 try:
@@ -479,7 +534,10 @@ async def remote_proxy(request):
     slot = int(request.match_info.get("slot") or 1)
     if tail == "ws":
         return await remote_ws(request, slot)
-    act(slot)["last"] = time.time()        # jede Anfrage (auch Fortschritt/Ergebnis abholen) = Nutzung
+    # Nur echte Nutzung zaehlt (Auftrag schicken, Bild hochladen, Modell laden, Ergebnis abholen) –
+    # automatisches Nachfragen (Fortschritt, Warteschlange, Version …) haelt die GPU NICHT wach.
+    if request.method != "GET" or tail.startswith("view"):
+        act(slot)["last"] = time.time()
     host = await target(slot)
     headers = auth_headers()
     if request.headers.get("Content-Type"):
@@ -600,6 +658,23 @@ async def _idle_check():
             print("[Easy Generate] Leerlauf-Pruefung:", err)
 
 
+HUNG = int(os.environ.get("EG_HUNG") or 40 * 60)     # so lange ohne jede Fortschrittsmeldung, obwohl ein Auftrag laeuft = haengt
+
+
+async def _pause_idle(x, why):
+    try:
+        await hf("POST", f"/api/spaces/{x['id']}/pause")
+        st = cstate()
+        e = _rented_entry(st, x["id"])
+        if e:
+            e["auto_paused_at"] = time.time()
+            e["auto_paused_why"] = why
+            save_cstate(st)
+        print(f"[Easy Generate] Cloud-GPU {x['id']} wurde pausiert: {why}")
+    except Exception as err:
+        print("[Easy Generate] Cloud-GPU konnte nicht pausiert werden:", err)
+
+
 async def _idle_one(x):
     slot = slot_of(x)
     A = act(slot)
@@ -607,40 +682,69 @@ async def _idle_one(x):
         rt = await hf("GET", f"/api/spaces/{x['id']}/runtime", timeout=15)
     except Exception:
         return
-    if rt.get("stage") != "RUNNING":
+    stage = rt.get("stage")
+    if stage != "RUNNING":
         A["last"] = time.time()            # Uhr laeuft erst, wenn sie wirklich bereit ist
+        A.pop("unreach", None); A.pop("seq", None)
+        if stage in ("BUILDING", "APP_STARTING", "RUNNING_BUILDING", "RUNNING_APP_STARTING"):
+            A.setdefault("boot", time.time())
+            if time.time() - A["boot"] > 45 * 60:   # Start haengt (bezahlt!) -> anhalten
+                A.pop("boot", None)
+                await _pause_idle(x, "Start dauerte ueber 45 Min.")
+        else:
+            A.pop("boot", None)
         return
+    A.pop("boot", None)
     limit = int(x.get("sleep") or 900)
-    if time.time() - A["last"] < limit:
-        return
-    # Laeuft gerade etwas? Dann nicht pausieren.
+    host, headers = None, auth_headers()
     try:
         host = await target(slot)
-        headers = auth_headers()
         async with session().get(host + "/queue", headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
-            if r.status != 200:
-                return                        # nicht sicher -> lieber nicht pausieren
-            q = await r.json()
-        if q.get("queue_running") or q.get("queue_pending"):
-            A["last"] = time.time()
+            q = await r.json() if r.status == 200 else None
+    except Exception:
+        q = None
+    if q is None:
+        # laeuft (bezahlt), antwortet aber nicht: nach der Leerlaufzeit trotzdem pausieren
+        A.setdefault("unreach", time.time())
+        if time.time() - A["unreach"] >= limit and time.time() - A["last"] >= limit:
+            A.pop("unreach", None)
+            await _pause_idle(x, f"antwortete {limit // 60} Min. nicht")
+        return
+    A.pop("unreach", None)
+    if q.get("queue_running") or q.get("queue_pending"):
+        # Haengt der laufende Auftrag? (keine Fortschrittsmeldung seit HUNG)
+        try:
+            async with session().get(host + "/easy/progress?since=999999999", headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
+                seq = (await r.json()).get("seq") if r.status == 200 else None
+        except Exception:
+            seq = None
+        if seq is not None and seq != A.get("seq"):
+            A["seq"], A["seq_t"] = seq, time.time()
+        if q.get("queue_running") and A.get("seq_t") and time.time() - A["seq_t"] > HUNG:
+            try:
+                async with session().post(host + "/interrupt", headers=headers, timeout=aiohttp.ClientTimeout(total=20)):
+                    pass
+                async with session().post(host + "/queue", headers=dict(headers, **{"Content-Type": "application/json"}), data=json.dumps({"clear": True}), timeout=aiohttp.ClientTimeout(total=20)):
+                    pass
+            except Exception:
+                pass
+            A.pop("seq", None); A.pop("seq_t", None)
+            await _pause_idle(x, f"Auftrag hing {HUNG // 60} Min. ohne Fortschritt")
             return
+        A["last"] = time.time()
+        return
+    A.pop("seq", None); A.pop("seq_t", None)
+    if time.time() - A["last"] < limit:
+        return
+    try:
         async with session().get(host + "/easy/models/status", headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as r:
             ms = await r.json() if r.status == 200 else {}
-        if ms.get("running"):
+        if ms.get("running") or ms.get("uploading"):
             A["last"] = time.time()
             return
     except Exception:
-        return                                # Cloud-GPU antwortet nicht sicher -> nicht pausieren
-    try:
-        await hf("POST", f"/api/spaces/{x['id']}/pause")
-        st = cstate()
-        e = _rented_entry(st, x["id"])
-        if e:
-            e["auto_paused_at"] = time.time()
-            save_cstate(st)
-        print(f"[Easy Generate] Cloud-GPU {x['id']} war {limit // 60} Min. ohne Auftrag und wurde pausiert.")
-    except Exception as err:
-        print("[Easy Generate] Cloud-GPU konnte nicht pausiert werden:", err)
+        pass
+    await _pause_idle(x, f"{limit // 60} Min. ohne Auftrag")
 
 
 async def _tick():
