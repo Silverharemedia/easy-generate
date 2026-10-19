@@ -482,6 +482,34 @@ function parseWallet(html) {
 }
 // Liest die Abrechnungsseite in einem unsichtbaren Fenster mit der HuggingFace-Anmeldung
 // (genau wie ein normaler Browser – mit Cookies und nachgeladenen Inhalten).
+// Verbrauch des laufenden Abrechnungszeitraums aus der Abrechnungsseite (die alte API-Abfrage gibt es nicht mehr)
+function billingUsageObj(props) {
+  for (const x of props) { try { const p = JSON.parse(x); if (p && p.usage && typeof p.usage === "object") return p; } catch (e) {} }
+  return null;
+}
+function billingUsage(props) {
+  const p = billingUsageObj(props); if (!p) return null;
+  const sum = v => {                       // alle Kostenfelder einsammeln (Mikro-Dollar oder Dollar)
+    let t = 0;
+    const walk = (o, k) => {
+      if (Array.isArray(o)) { o.forEach(x => walk(x, k)); return; }
+      if (o && typeof o === "object") { for (const [kk, vv] of Object.entries(o)) walk(vv, kk); return; }
+      if (typeof o !== "number" || !k) return;
+      if (/costmicrousd$/i.test(k)) t += o / 1e6;
+      else if (/^(total)?(cost|amount)(usd)?$/i.test(k) || /costusd$/i.test(k)) t += o;
+    };
+    walk(v, ""); return t;
+  };
+  const cats = {}; let total = 0;
+  for (const [cat, v] of Object.entries(p.usage)) { if (v && typeof v === "object") { const c = sum(v); cats[cat] = c; total += c; } }
+  const per = p.period || (Array.isArray(p.last3periods) && p.last3periods[0]) || {};
+  return { total, cats, period: per && typeof per === "object" ? per : {}, src: "page" };
+}
+function usageShape(props) {             // nur die Struktur (Schlüssel/Typen) für die Fehlersuche, keine Werte
+  const p = billingUsageObj(props); if (!p) return null;
+  const sh = (o, d) => d > 4 ? "…" : Array.isArray(o) ? [o.length ? sh(o[0], d + 1) : "[]"] : o && typeof o === "object" ? Object.fromEntries(Object.entries(o).slice(0, 15).map(([k, v]) => [k, sh(v, d + 1)])) : typeof o;
+  return { usage: sh(p.usage, 0), period: sh(p.period, 0), last3periods: sh(p.last3periods, 0) };
+}
 function loadBillingPage() {
   return new Promise(resolve => {
     const w = new BrowserWindow({ show: false, width: 1200, height: 900, webPreferences: { partition: HF_PART, contextIsolation: true, nodeIntegration: false, sandbox: true } });
@@ -509,7 +537,9 @@ function loadBillingPage() {
             if (m) wl.balance = parseFloat(m[1].replace(/,/g, "")), wl.fromText = true;
           }
           if (wl.balance != null || i === 5) {
-            try { fs.writeFileSync(path.join(app.getPath("userData"), "hf_billing_debug.txt"), JSON.stringify({ url, keys: r.props.map(x => { try { return Object.keys(JSON.parse(x)); } catch (e) { return "?"; } }), text: r.text.slice(0, 3000) }, null, 1)); } catch (e) {}
+            const us = billingUsage(r.props);
+            if (us) wl.usage = us;
+            try { fs.writeFileSync(path.join(app.getPath("userData"), "hf_billing_debug.txt"), JSON.stringify({ url, keys: r.props.map(x => { try { return Object.keys(JSON.parse(x)); } catch (e) { return "?"; } }), usageShape: usageShape(r.props), usage: us, text: r.text.slice(0, 3000) }, null, 1)); } catch (e) {}
             return finish({ ...wl, loggedIn: true });
           }
         }

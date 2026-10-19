@@ -16,7 +16,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.8.3"
+VERSION = "1.8.4"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -925,7 +925,7 @@ public static class EGTemp {
   [StructLayout(LayoutKind.Sequential)] public struct ADAPTERINFO { public uint hAdapter; public LUID AdapterLuid; public uint NumOfSources; public int bPrecisePresentRegionsPreferred; }
   [StructLayout(LayoutKind.Sequential)] public struct ENUMADAPTERS2 { public uint NumAdapters; public IntPtr pAdapters; }
   [StructLayout(LayoutKind.Sequential)] public struct QUERYADAPTERINFO { public uint hAdapter; public int Type; public IntPtr pPrivateDriverData; public uint PrivateDriverDataSize; }
-  [StructLayout(LayoutKind.Sequential)] public struct PERFDATA { public uint PhysicalAdapterIndex; public ulong MemoryFrequency; public ulong MaxMemoryFrequency; public ulong MaxMemoryFrequencyOC; public ulong MemoryBandwidth; public ulong PCIEBandwidth; public uint FanRPM; public uint Power; public ulong Temperature; public byte PowerStateOverride; }
+  [StructLayout(LayoutKind.Sequential)] public struct PERFDATA { public uint PhysicalAdapterIndex; public ulong MemoryFrequency; public ulong MaxMemoryFrequency; public ulong MaxMemoryFrequencyOC; public ulong MemoryBandwidth; public ulong PCIEBandwidth; public uint FanRPM; public uint Power; public uint Temperature; public byte PowerStateOverride; }
   [DllImport("gdi32.dll")] static extern int D3DKMTEnumAdapters2(ref ENUMADAPTERS2 p);
   [DllImport("gdi32.dll")] static extern int D3DKMTQueryAdapterInfo(ref QUERYADAPTERINFO p);
   static List<uint> handles = null;
@@ -979,7 +979,7 @@ function AcpiTemp {
     $w = @(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue)
     foreach ($x in $w) { $c = $x.CurrentTemperature / 10.0 - 273.15; if ($c -gt $m) { $m = $c } }
   }
-  if ($m -lt 5 -or $m -gt 120) { return $null } else { return [math]::Round($m, 1) }
+  if ($m -lt 25 -or $m -gt 115) { return $null } else { return [math]::Round($m, 1) }   # unter 25 °C: kein echter CPU-Wert
 }
 $n = 0; $lhm = $null
 while ($true) {

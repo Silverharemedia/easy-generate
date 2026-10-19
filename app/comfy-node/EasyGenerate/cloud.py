@@ -213,6 +213,14 @@ async def _account():
             out["space_token"] = {"ok": bool(sj), "role": at.get("role"), "same_user": sj.get("name") == uname, "read_own": read_own}
         except Exception:
             out["space_token"] = {"ok": None}
+    # genaues ZeroGPU-Kontingent (offizielle Abfrage von Hugging Face)
+    try:
+        zq = await hf("GET", "/api/spaces/zero-gpu/quota", timeout=10)
+        if isinstance(zq, dict) and zq.get("base") is not None:
+            out["zgpu"] = {"base": float(zq.get("base") or 0), "left": float(zq.get("current") or 0), "resets": zq.get("resetsAt"),
+                           "over": zq.get("overquotaUsed")}
+    except Exception:
+        pass
     out["included"] = 2.0 if out.get("user", {}).get("isPro") else 0.0
     out["zerogpu_min"] = 40 if out.get("user", {}).get("isPro") else 5
     st = cstate()

@@ -735,6 +735,7 @@
     ["Liste leeren", "Clear list", "Очистить список"], ["Prompt kopieren", "Copy prompt", "Копировать промпт"], ["Bild und Prompt übernehmen", "Use image and prompt", "Взять изображение и промпт"],
     ["Prompt kopiert.", "Prompt copied.", "Промпт скопирован."], ["Bild und Prompt übernommen.", "Image and prompt taken over.", "Изображение и промпт перенесены."],
     ["Prompt übernommen – das Bild ist nicht mehr verfügbar.", "Prompt taken over – the image is no longer available.", "Промпт перенесён – изображение больше недоступно."], ["Min.", "min", "мин"],
+    ["Min. übrig", "min left", "мин осталось"], ["Wieder voll ab", "Refilled from", "Снова полный с"],
     ["Pausiert – kostet jetzt nichts mehr.", "Paused – no more costs now.", "Приостановлено – больше ничего не стоит."],
     ["Kein Guthaben vorhanden – zum Mieten zuerst bei HuggingFace Guthaben aufladen.", "No credit available – top up at HuggingFace before renting.", "Нет баланса – перед арендой пополни баланс на HuggingFace."],
     ["✓ Bei HuggingFace angemeldet.", "✓ Signed in to HuggingFace.", "✓ Вход в HuggingFace выполнен."],

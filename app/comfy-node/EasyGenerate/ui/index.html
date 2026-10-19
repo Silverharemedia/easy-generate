@@ -1569,6 +1569,7 @@ function extLink(url, text, cls){ return `<a class="${cls || ""}" href="${esc(ur
 async function loadAccount(force){
   cloud.acct = await api("/easy/cloud/account" + (force ? "?force=1" : ""));
   if(host && host.hfWallet && cloud.acct.token_set && !cloud.acct.error){ try{ cloud.wallet = await host.hfWallet(); }catch(e){ cloud.wallet = null; } }
+  if(!cloud.acct.usage && cloud.wallet && cloud.wallet.usage){ cloud.acct.usage = cloud.wallet.usage; delete cloud.acct.usage_error; }
   return cloud.acct;
 }
 function available(){ const r = availableRaw(); return r && r.partial && r.v <= 0 ? null : r; }
@@ -1620,7 +1621,7 @@ function renderAccount(){
   else if(w && w.loggedIn) wal = `<div class="msg ok" style="margin-bottom:6px">✓ Bei HuggingFace angemeldet.</div><div class="hint">Auf deiner Abrechnungsseite wurde kein Prepaid-Guthaben gefunden – vermutlich wurde noch nichts aufgeladen. ${extLink(HFL.billing, "Abrechnung ansehen")}</div>`;
   else if(host && host.hfLogin) wal = `<div class="hint" style="margin-bottom:6px">${w && w.error ? "HuggingFace war nicht erreichbar (" + esc(w.error) + "). " : ""}Das Guthaben zeigt HuggingFace nur nach Anmeldung an.</div><button class="btn pri" type="button" id="clLogin">Bei HuggingFace anmelden, um das Guthaben zu sehen</button>`;
   else wal = `<div class="hint">Guthaben ansehen: ${extLink(HFL.billing, "huggingface.co/settings/billing")}</div>`;
-  const period = us && us.period && us.period.periodEnd ? new Date(us.period.periodEnd).toLocaleDateString() : "";
+  const period = us && us.period && us.period.periodEnd ? new Date(us.period.periodEnd).toLocaleDateString((window.EG_I18N && EG_I18N.lang) || "de") : "";
   const catNames = { Endpoints: "Inference Endpoints", Spaces: "Gemietete Spaces (GPU)", "Inference Providers": "Pro Video / Bild (Anbieter)", Jobs: "Jobs", ZeroGPU: "ZeroGPU über Kontingent" };
   const cats = us ? Object.entries(us.cats || {}).filter(([, v]) => v > 0).map(([k, v]) => `<div class="kv"><span>${esc(catNames[k] || k)}</span><span>${usd(v)}</span></div>`).join("") : "";
   const role = a.token_role, st = a.space_token;
@@ -1677,7 +1678,8 @@ function renderReach(){
     lines.push(`<div class="kv"><span>GPU mieten · ${esc(h.pretty)} <span class="hint">${usd(h.per_hour)}/Std.</span></span><span>${hrs != null ? `≈ <b>${hrs >= 10 ? Math.floor(hrs) : hrs.toFixed(1).replace(".", ",")}</b> Std.` : ""}</span></div>`);
   }
   el.innerHTML = `<h3>⏳ Wofür reicht es?</h3>
-    <div class="kv"><span>🆓 Gratis (ZeroGPU-Spaces)</span><span>ca. <b>${a.zerogpu_min || 5} Min.</b> GPU pro Tag</span></div>
+    ${a.zgpu ? `<div class="kv"><span>🆓 Gratis (ZeroGPU-Spaces)</span><span><b>${(a.zgpu.left / 60).toFixed(1).replace(".", ",")}</b> / ${Math.round(a.zgpu.base / 60)} <span>Min. übrig</span></span></div>${a.zgpu.resets ? `<div class="hint" style="text-align:right;margin-top:-4px"><span>Wieder voll ab</span> ${esc(new Date(a.zgpu.resets).toLocaleString((window.EG_I18N && EG_I18N.lang) || "de", { weekday: "short", hour: "2-digit", minute: "2-digit" }))}</div>` : ""}`
+      : `<div class="kv"><span>🆓 Gratis (ZeroGPU-Spaces)</span><span>ca. <b>${a.zerogpu_min || 5} Min.</b> GPU pro Tag</span></div>`}
     <p class="hint" style="margin:4px 0 10px">Reicht meist für 2–8 kurze Videos am Tag, je nach Space. ${a.user && !a.user.isPro ? "Mit PRO 40 Min. pro Tag." : ""}${zl ? ` Zuletzt gemeldet: noch ${zl.seconds} s übrig.` : ""}</p>
     ${lines.join("")}
     <p class="hint" style="margin:8px 0 0"><span>${av ? (av.partial ? "Ohne dein Prepaid-Guthaben gerechnet – melde dich links an, dann wird es mitgezählt." : "") : a.token_set ? (host && host.hfLogin ? "Melde dich links bei HuggingFace an, dann siehst du, wie lange dein Guthaben reicht." : "") : "Verbinde dein Konto, dann siehst du, wie lange dein Guthaben reicht."}</span> <span>Preise sind Richtwerte der Anbieter; nach deinen ersten Erstellungen rechnet Easy Generate mit deinen echten Kosten.</span></p>`;
