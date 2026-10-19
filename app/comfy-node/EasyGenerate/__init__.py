@@ -16,7 +16,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.8.6"
+VERSION = "1.8.7"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -1095,6 +1095,52 @@ async def easy_specs(request):
     return web.json_response(await asyncio.to_thread(hw_specs))
 
 
+# LibreHardwareMonitor mit eingeschaltetem Web-Server (Optionen → Remote Web Server, Port 8085):
+# liefert die echte CPU-Temperatur (Tctl/Tdie bzw. Package) auch ohne WMI.
+LHM_WEB = {"t": 0.0, "cpu": None, "gpu": None, "next": 0.0}
+
+
+def _num(v):
+    m = re.match(r"\s*(-?[\d.,]+)", str(v or ""))
+    try:
+        return float(m.group(1).replace(",", ".")) if m else None
+    except ValueError:
+        return None
+
+
+def _lhm_web():
+    import urllib.request
+    now = time.time()
+    if now < LHM_WEB["next"]:
+        return
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8085/data.json", timeout=0.6) as r:
+            tree = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:
+        LHM_WEB.update(cpu=None, gpu=None, next=now + 30)     # laeuft nicht: seltener nachsehen
+        return
+    best = {"cpu": (None, -1), "gpu": (None, -1)}
+
+    def walk(n, kind, in_temp):
+        txt = str(n.get("Text") or ""); img = str(n.get("ImageURL") or "").lower()
+        if "cpu" in img: kind = "cpu"
+        elif any(k in img for k in ("ati.png", "nvidia", "gpu")): kind = "gpu"
+        elif img and n.get("Children") and not in_temp: kind = kind if "Temperatures" in txt else None if img.endswith(("mainboard.png", "hdd.png", "ram.png", "nic.png")) else kind
+        if txt == "Temperatures": in_temp = True
+        kids = n.get("Children") or []
+        if not kids and in_temp and kind:
+            v = _num(n.get("Value"))
+            if v is not None and 5 < v < 125:
+                t = txt.lower()
+                rank = 3 if any(k in t for k in ("tctl", "tdie", "package")) else 2 if ("core" in t and "memory" not in t) or t.startswith("gpu") else 1
+                if "memory" in t or ("hot spot" in t and kind == "cpu"): rank = 0
+                if rank > best[kind][1]: best[kind] = (v, rank)
+        for k in kids:
+            walk(k, kind, in_temp)
+    walk(tree, None, False)
+    LHM_WEB.update(cpu=best["cpu"][0], gpu=best["gpu"][0], t=now, next=now + 4)
+
+
 @routes.get("/easy/sysinfo")
 async def easy_sysinfo(request):
     ensure_gpu_reader()
@@ -1105,6 +1151,15 @@ async def easy_sysinfo(request):
     except Exception:
         pass
     td = TEMP_STAT["data"] or {}
+    if os.name == "nt" and td.get("cpu") is None:
+        try:
+            await asyncio.to_thread(_lhm_web)
+        except Exception:
+            pass
+        if LHM_WEB["cpu"] is not None:
+            td = dict(td, cpu=round(LHM_WEB["cpu"], 1), cpu_src="lhm")
+            if td.get("gpu") is None and LHM_WEB["gpu"] is not None:
+                td["gpu"] = round(LHM_WEB["gpu"], 1)
     out = {"cpu_temp": td.get("cpu"), "cpu_temp_src": td.get("cpu_src"), "gpu_temp": td.get("gpu"), "gpu_fan": td.get("fan"), "cpu": None, "ram_used": None, "ram_total": None, "gpu": GPU_STAT["util"], "vram_used": None, "vram_total": None, "gpu_name": ""}
     try:
         import psutil
