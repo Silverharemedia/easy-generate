@@ -16,7 +16,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.8.7"
+VERSION = "1.8.8"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -501,7 +501,7 @@ async def _download_one(session, m):
         m["got"] = m["size"] = os.path.getsize(dst)
         return
     # gemeinsamer Schnellstart-Speicher (mehrere Cloud-GPUs): eigene Teildatei je Rechner
-    part = dst + (".part-" + __import__("socket").gethostname() if os.environ.get("EG_SHARED_MODELS") else ".part")
+    part = dst + ".part"
     have = os.path.getsize(part) if os.path.exists(part) else 0
     headers = {"Range": f"bytes={have}-"} if have else {}
     token = load_cfg().get("hf_token")
@@ -513,6 +513,7 @@ async def _download_one(session, m):
             raise RuntimeError("Download verweigert – dieses Modell braucht einen HuggingFace-Zugang (Token in den Einstellungen)")
         if r.status == 416 and have:
             os.replace(part, dst)
+            _store_copy(dst)
             return
         if r.status not in (200, 206):
             raise RuntimeError(f"Server antwortet mit Fehler {r.status}")
@@ -535,6 +536,33 @@ async def _download_one(session, m):
     if m["size"] and os.path.getsize(part) < m["size"]:
         raise RuntimeError("Download unvollstaendig – wird beim naechsten Versuch fortgesetzt")
     os.replace(part, dst)
+    _store_copy(dst)
+
+
+# Cloud-GPU mit Schnellstart-Speicher: neu geladene Modelle im Hintergrund dorthin sichern,
+# damit sie beim naechsten Start nicht wieder aus dem Netz geladen werden muessen.
+def _store_copy(path):
+    store = os.environ.get("EG_MODEL_STORE")
+    if not store:
+        return
+    def run():
+        try:
+            import folder_paths, socket
+            rel = os.path.relpath(path, folder_paths.models_dir)
+            if rel.startswith(".."):
+                return
+            out = os.path.join(store, rel)
+            if os.path.isfile(out) and os.path.getsize(out) == os.path.getsize(path):
+                return
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            tmp = out + ".up-" + socket.gethostname()
+            shutil.copyfile(path, tmp)
+            os.replace(tmp, out)
+            print("[Easy Generate] Im Schnellstart-Speicher gesichert:", rel)
+        except Exception as e:
+            print("[Easy Generate] Schnellstart-Speicher: konnte nicht sichern:", path, e)
+    import threading
+    threading.Thread(target=run, daemon=True).start()
 
 
 async def _worker():

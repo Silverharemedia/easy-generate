@@ -26,7 +26,7 @@ SPACE_NAME = "eg-comfyui"
 MAX_SLOTS = 20
 # Nur erhoehen, wenn sich etwas aendert, das auf der Cloud-GPU selbst laufen muss
 # (dann wird dort ein Update angeboten). 2 = Fortschritt per /easy/progress.
-REMOTE_API = 3          # 3 = Schnellstart-Speicher (/data) wird unterstuetzt
+REMOTE_API = 4          # 3 = Schnellstart-Speicher (/data); 4 = Modelle beim Start auf die lokale Platte kopieren
 BUCKET_NAME = "eg-models"
 
 DOCKERFILE = """FROM python:3.12-slim
@@ -50,12 +50,40 @@ START_SH = """#!/bin/sh
 cd /home/user
 if [ -d /data ] && [ -w /data ]; then
   mkdir -p /data/models
-  if [ ! -L ComfyUI/models ]; then
-    cp -rn ComfyUI/models/. /data/models/ 2>/dev/null
-    rm -rf ComfyUI/models && ln -s /data/models ComfyUI/models
-  fi
-  export EG_SHARED_MODELS=1
-  echo "[Easy Generate] Schnellstart-Speicher aktiv: /data/models"
+  echo "[Easy Generate] Schnellstart: hole Modelle aus dem Speicher ..."
+  python - <<'EOF'
+import os, shutil, time, concurrent.futures as cf
+src, dst = "/data/models", "/home/user/ComfyUI/models"
+jobs = []
+for root, _, files in os.walk(src):
+    for f in files:
+        if ".part" in f or ".up-" in f:
+            continue
+        a = os.path.join(root, f); b = os.path.join(dst, os.path.relpath(a, src))
+        try:
+            if os.path.isfile(b) and os.path.getsize(b) == os.path.getsize(a):
+                continue
+        except OSError:
+            continue
+        jobs.append((a, b))
+def cp(ab):
+    a, b = ab
+    os.makedirs(os.path.dirname(b), exist_ok=True)
+    with open(a, "rb") as fi, open(b + ".cp", "wb") as fo:
+        shutil.copyfileobj(fi, fo, 64 * 1024 * 1024)
+    os.replace(b + ".cp", b)
+    return os.path.getsize(b)
+t, n = time.time(), 0
+with cf.ThreadPoolExecutor(8) as ex:
+    for fut in cf.as_completed([ex.submit(cp, x) for x in jobs]):
+        try:
+            n += fut.result()
+        except Exception as e:
+            print("[Easy Generate] Schnellstart: Fehler", e, flush=True)
+dt = max(time.time() - t, 0.1)
+print("[Easy Generate] Schnellstart: %d Dateien, %.1f GB in %.0f s (%.0f MB/s)" % (len(jobs), n / 1e9, dt, n / dt / 1e6), flush=True)
+EOF
+  export EG_MODEL_STORE=/data/models
 fi
 exec python ComfyUI/main.py --listen 0.0.0.0 --port 7860 --disable-auto-launch
 """

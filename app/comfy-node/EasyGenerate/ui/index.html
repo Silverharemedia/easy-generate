@@ -917,17 +917,23 @@ async function generate(opts){
   try{
     if(B && !(await gpuPrepare(key, B))) return;
     const thumb = await makeThumb((imgs.find(([im, img]) => img && !img.audio) || [])[1]);
-    const inputs = [];
-    for(const [im, img] of imgs){
-      const name = await uploadImage(img, B); wf[im.id].inputs[im.key] = name;
-      let local = B ? null : name;
-      if(B){ try{ local = await uploadImage(img, ""); }catch(e){} }   // Kopie auf dem PC – fürs spätere „Übernehmen“
-      inputs.push({ id: im.id, name: local, remote: B ? name : null });
+    let inputs, rpSeq, r, j;
+    for(let attempt = 0; ; attempt++){
+      inputs = [];
+      for(const [im, img] of imgs){
+        if(attempt && img.up) delete img.up[B];          // GPU wurde neu gestartet: Bild ist dort weg – neu hochladen
+        const name = await uploadImage(img, B); wf[im.id].inputs[im.key] = name;
+        let local = B ? null : name;
+        if(B){ try{ local = await uploadImage(img, ""); }catch(e){} }   // Kopie auf dem PC – fürs spätere „Übernehmen“
+        inputs.push({ id: im.id, name: local, remote: B ? name : null });
+      }
+      rpSeq = null;
+      if(B){ try{ rpSeq = (await api(B + "/easy/progress?since=999999999")).seq || 0; }catch(e){} }
+      r = await fetch(B + "/prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: wf, client_id: cid }) });
+      j = await r.json().catch(() => ({}));
+      if(!attempt && imgs.length && (!r.ok || j.error) && /Invalid image file|image.*not found/i.test(JSON.stringify(j.node_errors || j.error || ""))) continue;
+      break;
     }
-    let rpSeq = null;
-    if(B){ try{ rpSeq = (await api(B + "/easy/progress?since=999999999")).seq || 0; }catch(e){} }
-    const r = await fetch(B + "/prompt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: wf, client_id: cid }) });
-    const j = await r.json().catch(() => ({}));
     if(!r.ok || j.error){
       const lines = [j.error && j.error.message || ("Fehler " + r.status)];
       for(const ne of Object.values(j.node_errors || {})) for(const e of ne.errors || []) lines.push(`${ne.class_type}: ${e.message}${e.details ? " – " + e.details : ""}`);
