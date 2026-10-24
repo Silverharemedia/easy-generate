@@ -641,9 +641,14 @@ async function seedvrInfo(B, force){
   try{
     const u = await api(B + "/object_info/SeedVR2VideoUpscaler");
     if(u.error) return seedInfo[B] = { ok: null };
-    if(!u.SeedVR2VideoUpscaler) return seedInfo[B] = { ok: false };
+    if(!u.SeedVR2VideoUpscaler){
+      // installiert, aber von ComfyUI nicht geladen (z. B. keine NVIDIA-Grafikkarte)
+      const st = B ? {} : await api("/easy/upscale/status").catch(() => ({}));
+      return seedInfo[B] = { ok: false, broken: !!st.installed };
+    }
     const d = await api(B + "/object_info/SeedVR2LoadDiTModel"), v = await api(B + "/object_info/SeedVR2LoadVAEModel");
-    return seedInfo[B] = { ok: !!(d.SeedVR2LoadDiTModel && v.SeedVR2LoadVAEModel), up: u.SeedVR2VideoUpscaler, dit: d.SeedVR2LoadDiTModel, vae: v.SeedVR2LoadVAEModel };
+    if(!d.SeedVR2LoadDiTModel || !v.SeedVR2LoadVAEModel) return seedInfo[B] = { ok: false, broken: true };   // nur halb geladen (kein passendes Gerät)
+    return seedInfo[B] = { ok: true, up: u.SeedVR2VideoUpscaler, dit: d.SeedVR2LoadDiTModel, vae: v.SeedVR2LoadVAEModel };
   }catch(e){ return seedInfo[B] = { ok: null }; }
 }
 function seedDevice(si){ return (oiOpts(si.dit, "device") || []).find(d => /^(cuda|mps|xpu)/.test(d)) || null; }
@@ -651,7 +656,7 @@ function addSeedVR2(wf, si, o){
   const outs = Object.values(wf).filter(n => OUT_RE.test(n.class_type) && isLink((n.inputs || {}).images));
   const dev = seedDevice(si);
   if(!outs.length || !dev) return false;
-  const big = !!o.B, vram = (state.sys && state.sys.vram_total || 0) / 1073741824, low = !big && vram > 0 && vram < 12;
+  const vram = o.vram || 0, big = vram >= 40 || (!!o.B && !vram), low = vram > 0 && vram < 12;
   const dits = oiOpts(si.dit, "model") || [];
   const want = big ? ["seedvr2_ema_7b_fp8_e4m3fn_mixed_block35_fp16.safetensors", "seedvr2_ema_3b_fp8_e4m3fn.safetensors"] : ["seedvr2_ema_3b_fp8_e4m3fn.safetensors"];
   const model = want.find(m => dits.includes(m)) || dits[0];
@@ -659,7 +664,7 @@ function addSeedVR2(wf, si, o){
   const dit = addNode(wf, { class_type: "SeedVR2LoadDiTModel", inputs: oiKeep(si.dit, { model, device: dev, ...swap, cache_model: false, attention_mode: "sdpa" }), _meta: { title: "Easy Generate: SeedVR2 Modell" } });
   const tile = { encode_tiled: true, encode_tile_size: 1024, encode_tile_overlap: 128, decode_tiled: true, decode_tile_size: 1024, decode_tile_overlap: 128 };
   const vae = addNode(wf, { class_type: "SeedVR2LoadVAEModel", inputs: oiKeep(si.vae, { model: (oiOpts(si.vae, "model") || [])[0], device: dev, ...tile, offload_device: low ? "cpu" : "none", cache_model: false }), _meta: { title: "Easy Generate: SeedVR2 VAE" } });
-  const res = Math.round(o.res / 2) * 2, batch = o.video ? (big ? 13 : 5) : 1, made = {};
+  const res = Math.round(o.res / 2) * 2, batch = o.video ? (big ? 13 : low ? 1 : 5) : 1, made = {};
   for(const n of outs){
     const k = n.inputs.images.join(":");
     made[k] = made[k] || addNode(wf, { class_type: "SeedVR2VideoUpscaler", _meta: { title: "Easy Generate: Hochskalieren" }, inputs: oiKeep(si.up, {
@@ -668,6 +673,12 @@ function addSeedVR2(wf, si, o){
     n.inputs.images = [made[k], 0];
   }
   return true;
+}
+function laneVram(B){         // Grafikspeicher in GB (0 = unbekannt)
+  if(!B) return (state.sys && state.sys.vram_total || 0) / 1073741824;
+  const e = (gpu.list || []).find(x => x.B === B), h = e ? hwOf(e) : {};
+  const v = parseFloat(h.vram) || 0, q = h.qty || 1;
+  return q > 1 && v > 96 ? v / q : v;           // SeedVR2 rechnet auf einer Karte
 }
 function upMode(){
   const k = state.kind, m = state.up[k] || "off", i = curInfo();
@@ -699,13 +710,18 @@ function renderUp(info){
     return;
   }
   const si = seedInfo[""];
-  if(!si){ hint.textContent = base; seedvrInfo("").then(() => { if(upMode() === "seedvr2") renderStudio(); }); return; }
+  if(!si || si.ok === null){
+    hint.textContent = base;
+    if(!seedInfo.wait){ seedInfo.wait = true; setTimeout(() => seedvrInfo("").then(r => { seedInfo.wait = false; if(r.ok !== null && upMode() === "seedvr2" && state.compute[state.kind] !== "gpu") renderStudio(); }), si ? 5000 : 0); }
+    return;
+  }
   if(si.ok && !seedDevice(si)){ hint.innerHTML = `<b>${esc(T("SeedVR2 braucht eine NVIDIA-Grafikkarte (oder einen Mac) – auf diesem PC geht es nicht. Tipp: auf der 🚀 Cloud-GPU erstellen."))}</b>`; return; }
   if(si.ok){
     const vram = (state.sys && state.sys.vram_total || 0) / 1073741824;
     hint.textContent = base + " " + T("Beim ersten Mal lädt SeedVR2 sein Modell (ca. 4 GB).") + (vram && vram < 12 ? " " + T("Wenig Grafikspeicher: läuft im Sparmodus, dafür langsamer.") : "");
     return;
   }
+  if(si.broken){ hint.innerHTML = `<b>${esc(T("SeedVR2 ist installiert, lässt sich auf diesem PC aber nicht starten – meist fehlt eine NVIDIA-Grafikkarte. Tipp: auf der 🚀 Cloud-GPU erstellen."))}</b>`; return; }
   hint.innerHTML = esc(T("SeedVR2 ist auf diesem PC noch nicht installiert.")) + ` <button class="btn" type="button" id="upInst">${esc(T("Jetzt installieren (einmalig)"))}</button> <span id="upInstTxt"></span>`;
   $("#upInst").onclick = installSeedVR2;
 }
@@ -965,6 +981,7 @@ function connectWS(){
 const fmtTime = s => { s = Math.floor(s); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
 function showMsg(kind, text){ $("#out").innerHTML = `<div class="msg ${kind}"></div>`; $("#out").firstChild.textContent = text; }
 function friendly(text){
+  if(/Failed to download required model files|SEEDVR2/i.test(text)) return text + "\n\n→ SeedVR2 konnte sein Modell nicht laden. Internetverbindung prüfen und erneut starten – oder Hochskalieren ausschalten.";
   if(/out of memory|OOM|hipErrorOutOfMemory|not enough memory|allocate/i.test(text)) return text + "\n\n→ Zu wenig Grafikspeicher. Wähle „Schnell“, ein kürzeres Video oder ein kleineres Modell.";
   if(/value_not_in_list|not in list|ckpt_name|unet_name|clip_name|vae_name|model_name/i.test(text)) return text + "\n\n→ Ein Modell fehlt. Unter „Modelle“ das Modell (erneut) installieren.";
   if(/missing_node_type|does not exist|not found.*node/i.test(text)) return text + "\n\n→ Ein Baustein fehlt. Unter Einstellungen „ComfyUI aktualisieren“ ausführen.";
@@ -1067,13 +1084,13 @@ async function generate(opts){
   // alles sofort festhalten – während die GPU startet, darf man schon das nächste Video vorbereiten
   const promptText = $("#prompt").value.trim(), units = workUnits(), est = estimate();
   const wf = buildPrompt({}, seed), imgs = info.images.map(im => [im, state.images[im.id]]);
-  const upSeed = upMode() === "seedvr2" ? { res: +state.upRes[k], video: k === "video", seed, B } : null;
+  const upSeed = upMode() === "seedvr2" ? { res: +state.upRes[k], video: k === "video", seed, B, vram: laneVram(B) } : null;
   state.submitting[B] = (state.submitting[B] || 0) + 1; clearTimeout(autoPauseT[B]); autoPauseArmed.delete(B);
   try{
     if(B && !(await gpuPrepare(key, B))) return;
     if(upSeed){
       const si = await seedvrInfo(B, true);
-      if(!si.ok){ showMsg("err", si.ok === false ? (B ? "SeedVR2 fehlt auf der Cloud-GPU – bitte die Cloud-GPU aktualisieren (⬆) und danach erneut starten." : "SeedVR2 ist noch nicht installiert – unter „Hochskalieren“ auf „Jetzt installieren“ klicken.") : "SeedVR2 ist gerade nicht erreichbar."); return; }
+      if(!si.ok){ showMsg("err", si.broken && B ? "SeedVR2 lässt sich auf der Cloud-GPU nicht starten – bitte die Cloud-GPU aktualisieren (⬆)." : si.broken ? "SeedVR2 ist installiert, lässt sich auf diesem PC aber nicht starten – meist fehlt eine NVIDIA-Grafikkarte. Tipp: auf der 🚀 Cloud-GPU erstellen." : si.ok === false ? (B ? "SeedVR2 fehlt auf der Cloud-GPU – bitte die Cloud-GPU aktualisieren (⬆) und danach erneut starten." : "SeedVR2 ist noch nicht installiert – unter „Hochskalieren“ auf „Jetzt installieren“ klicken.") : "SeedVR2 ist gerade nicht erreichbar."); return; }
       if(!addSeedVR2(wf, si, upSeed)){ showMsg("err", seedDevice(si) ? "Hochskalieren: In dieser Vorlage wurde keine Bild-/Video-Ausgabe gefunden." : "SeedVR2 braucht eine NVIDIA-Grafikkarte (oder einen Mac) – auf diesem PC geht es nicht."); return; }
     }
     const thumb = await makeThumb((imgs.find(([im, img]) => img && !img.audio) || [])[1]);

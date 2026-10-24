@@ -204,6 +204,9 @@
     "SeedVR2 ist gerade nicht erreichbar.": "SeedVR2 is not reachable right now.",
     "Hochskalieren: In dieser Vorlage wurde keine Bild-/Video-Ausgabe gefunden.": "Upscaling: no image/video output was found in this template.",
     "Auf der Cloud-GPU ist SeedVR2 schon dabei – bitte die Cloud-GPU aktualisieren.": "SeedVR2 is already included on the cloud GPU – please update the cloud GPU.",
+    "→ SeedVR2 konnte sein Modell nicht laden. Internetverbindung prüfen und erneut starten – oder Hochskalieren ausschalten.": "→ SeedVR2 could not download its model. Check the internet connection and start again – or turn upscaling off.",
+    "SeedVR2 lässt sich auf der Cloud-GPU nicht starten – bitte die Cloud-GPU aktualisieren (⬆).": "SeedVR2 can't start on the cloud GPU – please update the cloud GPU (⬆).",
+    "SeedVR2 ist installiert, lässt sich auf diesem PC aber nicht starten – meist fehlt eine NVIDIA-Grafikkarte. Tipp: auf der 🚀 Cloud-GPU erstellen.": "SeedVR2 is installed but can't start on this PC – usually an NVIDIA graphics card is missing. Tip: create on the 🚀 cloud GPU.",
   };
 
   const RU = {
@@ -494,7 +497,10 @@
    "SeedVR2 ist noch nicht installiert – unter „Hochskalieren“ auf „Jetzt installieren“ klicken.": "SeedVR2 ещё не установлен – нажми «Установить сейчас» в разделе «Апскейл».",
    "SeedVR2 ist gerade nicht erreichbar.": "SeedVR2 сейчас недоступен.",
    "Hochskalieren: In dieser Vorlage wurde keine Bild-/Video-Ausgabe gefunden.": "Апскейл: в этом шаблоне не найден вывод изображения/видео.",
-   "Auf der Cloud-GPU ist SeedVR2 schon dabei – bitte die Cloud-GPU aktualisieren.": "На облачном GPU SeedVR2 уже есть – обнови облачный GPU."
+   "Auf der Cloud-GPU ist SeedVR2 schon dabei – bitte die Cloud-GPU aktualisieren.": "На облачном GPU SeedVR2 уже есть – обнови облачный GPU.",
+   "→ SeedVR2 konnte sein Modell nicht laden. Internetverbindung prüfen und erneut starten – oder Hochskalieren ausschalten.": "→ SeedVR2 не смог загрузить свою модель. Проверь интернет и запусти снова – или выключи апскейл.",
+   "SeedVR2 lässt sich auf der Cloud-GPU nicht starten – bitte die Cloud-GPU aktualisieren (⬆).": "SeedVR2 не запускается на облачном GPU – обнови облачный GPU (⬆).",
+   "SeedVR2 ist installiert, lässt sich auf diesem PC aber nicht starten – meist fehlt eine NVIDIA-Grafikkarte. Tipp: auf der 🚀 Cloud-GPU erstellen.": "SeedVR2 установлен, но не запускается на этом ПК – обычно не хватает видеокарты NVIDIA. Совет: создавай на 🚀 облачном GPU."
   };
 
   // Texte mit Zahlen/Namen
