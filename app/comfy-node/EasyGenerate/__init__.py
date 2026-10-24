@@ -16,7 +16,7 @@ import aiohttp
 from aiohttp import web
 from server import PromptServer
 
-VERSION = "1.8.11"
+VERSION = "1.9.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 UI_FILE = os.path.join(HERE, "ui", "index.html")
 DATA = os.path.join(HERE, "data")
@@ -1267,6 +1267,10 @@ try:
     from . import gallery  # noqa: F401  (Galerie mit Modell-Zuordnung)
 except Exception as _e:
     print("[Easy Generate] Galerie-Modul nicht geladen:", _e)
+try:
+    from . import upscale  # noqa: F401  (SeedVR2 auf Wunsch installieren)
+except Exception as _e:
+    print("[Easy Generate] Hochskalier-Modul nicht geladen:", _e)
 try:
     from . import cloud  # noqa: F401  (registriert die Cloud-Routen)
     from . import remote  # noqa: F401  (eigene Cloud-GPU mit ComfyUI)

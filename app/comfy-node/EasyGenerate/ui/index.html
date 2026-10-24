@@ -256,6 +256,9 @@ code{background:var(--panel2);padding:1px 6px;border-radius:5px}
           <div id="lenBox"><label class="l">Länge: <b id="secTxt">5 s</b> <span class="hint" id="frameTxt"></span></label>
             <div class="row"><input type="range" id="sec" min="1" max="20" step="1" value="5"></div></div>
           <div id="batchBox"><label class="l">Anzahl Bilder</label><div class="chips" id="batch"></div></div>
+          <div id="upBox"><label class="l">Hochskalieren <span class="hint">(auf Wunsch)</span></label><div class="chips" id="upMode"></div>
+            <div class="chips hidden" id="upOpt" style="margin-top:8px"></div>
+            <div class="hint" id="upHint" style="margin-top:6px"></div></div>
 
           <details>
             <summary>Erweitert</summary>
@@ -455,6 +458,7 @@ const state = {
   active: { video: "", image: "" },
   aspect: store.get("aspect", { video: "16:9", image: "1:1" }),
   size: store.get("size", "normal"), seconds: store.get("sec", 5), batch: 1,
+  up: store.get("up", { video: "off", image: "off" }), upRes: store.get("upRes", { video: 1080, image: 2160 }), upScale: store.get("upScale", 1.5),
   images: {}, catalog: [], mKind: "video"
 };
 
@@ -517,6 +521,8 @@ function analyze(wf){
     for(const k of ["seed", "noise_seed"]) if(typeof ins[k] === "number") info.seeds.push({ id, k });
   }
   if(info.pos && info.neg && info.pos.id === info.neg.id) info.neg = null;
+  info.hires = !!hiresSpot(wf);
+  info.canUp = Object.values(wf).some(n => OUT_RE.test(n.class_type) && isLink((n.inputs || {}).images));
   if(!info.pos){
     const t = Object.entries(wf).filter(([, n]) => textKey(n));
     if(t.length){ info.pos = { id: t[0][0], key: textKey(t[0][1]) }; if(t[1]) info.neg = { id: t[1][0], key: textKey(t[1][1]) }; }
@@ -577,7 +583,147 @@ function buildPrompt(names, seed){
   for(const s of info.seeds) wf[s.id].inputs[s.k] = seed;
   for(const im of info.images) if(names[im.id]) wf[im.id].inputs[im.key] = names[im.id];
   if(info.turbo) wf[info.turbo.id].inputs.value = !!$("#turbo").checked;
+  if(upMode() === "hires") addHires(wf, state.upScale);
   return wf;
+}
+
+/* ================= Hochskalieren (auf Wunsch) ================= */
+// „2. Durchgang“: Bild vergrößern und mit wenig Rauschen noch einmal rechnen (nur Standard-Knoten).
+// „SeedVR2“: eigenes Hochskalier-Modell hinter dem fertigen Bild/Video – läuft im selben Auftrag auf demselben Rechner.
+const UP_MODES = { off: { n: "Aus" }, hires: { n: "2. Durchgang", sub: "mehr Details" }, seedvr2: { n: "SeedVR2", sub: "schärfer & größer" } };
+const UP_RES = { 1080: "Full HD", 1440: "2K", 2160: "4K" };
+const HIRES_DENOISE = 0.35;
+const SAMPLER_RE = /^(KSampler|KSamplerAdvanced|SamplerCustom|SamplerCustomAdvanced)$/;
+const OUT_RE = /^(SaveImage|CreateVideo|VHS_VideoCombine|SaveAnimatedWEBP|SaveAnimatedPNG|SaveWEBM)$/;
+function hiresSpot(wf){
+  for(const [id, n] of Object.entries(wf)){
+    const ins = n.inputs || {};
+    if(!/^VAEDecode(Tiled)?$/.test(n.class_type) || !isLink(ins.samples) || !isLink(ins.vae)) continue;
+    const sm = wf[String(ins.samples[0])];
+    if(!sm || !SAMPLER_RE.test(sm.class_type) || !isLink(sm.inputs.latent_image)) continue;
+    if(sm.class_type === "KSamplerAdvanced" && typeof sm.inputs.steps !== "number") continue;
+    if(/^SamplerCustom/.test(sm.class_type) && !(isLink(sm.inputs.sigmas) && (wf[String(sm.inputs.sigmas[0])] || {}).class_type === "BasicScheduler")) continue;
+    return { dec: id, smp: String(ins.samples[0]), out: ins.samples[1] };
+  }
+  return null;
+}
+function addNode(wf, n){ let i = 1; while(wf["eg_up" + i]) i++; wf["eg_up" + i] = n; return "eg_up" + i; }
+function addHires(wf, scale){
+  const spot = hiresSpot(wf); if(!spot) return false;
+  const D = wf[spot.dec], S = wf[spot.smp];
+  const d1 = addNode(wf, { class_type: D.class_type, inputs: { ...D.inputs }, _meta: { title: "Easy Generate: 1. Durchgang" } });
+  const sc = addNode(wf, { class_type: "ImageScaleBy", inputs: { image: [d1, 0], upscale_method: "lanczos", scale_by: scale } });
+  const en = addNode(wf, { class_type: "VAEEncode", inputs: { pixels: [sc, 0], vae: D.inputs.vae } });
+  const s2 = { class_type: S.class_type, inputs: { ...S.inputs, latent_image: [en, 0] }, _meta: { title: "Easy Generate: 2. Durchgang" } };
+  if(S.class_type === "KSampler") s2.inputs.denoise = HIRES_DENOISE;
+  else if(S.class_type === "KSamplerAdvanced") Object.assign(s2.inputs, { add_noise: "enable", start_at_step: Math.round(S.inputs.steps * (1 - HIRES_DENOISE)), end_at_step: 10000, return_with_leftover_noise: "disable" });
+  else s2.inputs.sigmas = [addNode(wf, { class_type: "BasicScheduler", inputs: { ...wf[String(S.inputs.sigmas[0])].inputs, denoise: HIRES_DENOISE } }), 0];
+  D.inputs.samples = [addNode(wf, s2), spot.out];
+  return true;
+}
+// Auswahl (Combo) aus /object_info lesen – alte und neue Schreibweise
+function oiOpts(node, name){
+  const ins = node && node.input || {}, spec = (ins.required || {})[name] || (ins.optional || {})[name];
+  if(!spec) return null;
+  if(Array.isArray(spec[0])) return spec[0];
+  if(spec[0] === "COMBO" && spec[1] && Array.isArray(spec[1].options)) return spec[1].options;
+  return [];
+}
+function oiKeep(node, inputs){        // nur Eingänge setzen, die diese SeedVR2-Version kennt
+  const ins = node && node.input || {}, known = { ...(ins.required || {}), ...(ins.optional || {}) }, out = {};
+  for(const [k, v] of Object.entries(inputs)) if(k in known) out[k] = v;
+  return out;
+}
+const seedInfo = {};                  // Rechner (B) -> { ok, up, dit, vae }
+async function seedvrInfo(B, force){
+  B = B || "";
+  if(seedInfo[B] && seedInfo[B].ok !== null && !force) return seedInfo[B];
+  try{
+    const u = await api(B + "/object_info/SeedVR2VideoUpscaler");
+    if(u.error) return seedInfo[B] = { ok: null };
+    if(!u.SeedVR2VideoUpscaler) return seedInfo[B] = { ok: false };
+    const d = await api(B + "/object_info/SeedVR2LoadDiTModel"), v = await api(B + "/object_info/SeedVR2LoadVAEModel");
+    return seedInfo[B] = { ok: !!(d.SeedVR2LoadDiTModel && v.SeedVR2LoadVAEModel), up: u.SeedVR2VideoUpscaler, dit: d.SeedVR2LoadDiTModel, vae: v.SeedVR2LoadVAEModel };
+  }catch(e){ return seedInfo[B] = { ok: null }; }
+}
+function seedDevice(si){ return (oiOpts(si.dit, "device") || []).find(d => /^(cuda|mps|xpu)/.test(d)) || null; }
+function addSeedVR2(wf, si, o){
+  const outs = Object.values(wf).filter(n => OUT_RE.test(n.class_type) && isLink((n.inputs || {}).images));
+  const dev = seedDevice(si);
+  if(!outs.length || !dev) return false;
+  const big = !!o.B, vram = (state.sys && state.sys.vram_total || 0) / 1073741824, low = !big && vram > 0 && vram < 12;
+  const dits = oiOpts(si.dit, "model") || [];
+  const want = big ? ["seedvr2_ema_7b_fp8_e4m3fn_mixed_block35_fp16.safetensors", "seedvr2_ema_3b_fp8_e4m3fn.safetensors"] : ["seedvr2_ema_3b_fp8_e4m3fn.safetensors"];
+  const model = want.find(m => dits.includes(m)) || dits[0];
+  const swap = low ? { blocks_to_swap: 32, swap_io_components: true, offload_device: "cpu" } : { blocks_to_swap: 0, offload_device: "none" };
+  const dit = addNode(wf, { class_type: "SeedVR2LoadDiTModel", inputs: oiKeep(si.dit, { model, device: dev, ...swap, cache_model: false, attention_mode: "sdpa" }), _meta: { title: "Easy Generate: SeedVR2 Modell" } });
+  const tile = { encode_tiled: true, encode_tile_size: 1024, encode_tile_overlap: 128, decode_tiled: true, decode_tile_size: 1024, decode_tile_overlap: 128 };
+  const vae = addNode(wf, { class_type: "SeedVR2LoadVAEModel", inputs: oiKeep(si.vae, { model: (oiOpts(si.vae, "model") || [])[0], device: dev, ...tile, offload_device: low ? "cpu" : "none", cache_model: false }), _meta: { title: "Easy Generate: SeedVR2 VAE" } });
+  const res = Math.round(o.res / 2) * 2, batch = o.video ? (big ? 13 : 5) : 1, made = {};
+  for(const n of outs){
+    const k = n.inputs.images.join(":");
+    made[k] = made[k] || addNode(wf, { class_type: "SeedVR2VideoUpscaler", _meta: { title: "Easy Generate: Hochskalieren" }, inputs: oiKeep(si.up, {
+      image: n.inputs.images, dit: [dit, 0], vae: [vae, 0], seed: o.seed % 4294967296, resolution: res, max_resolution: 0,
+      batch_size: batch, uniform_batch_size: !!o.video, temporal_overlap: o.video ? 2 : 0, color_correction: "lab", offload_device: "cpu" }) });
+    n.inputs.images = [made[k], 0];
+  }
+  return true;
+}
+function upMode(){
+  const k = state.kind, m = state.up[k] || "off", i = curInfo();
+  if(m !== "off" && (!i || !i.canUp)) return "off";
+  if(m === "hires" && (k !== "image" || !i.hires)) return "off";
+  return UP_MODES[m] ? m : "off";
+}
+function renderUp(info){
+  const k = state.kind, onGpu = state.compute[k] === "gpu";
+  $("#upBox").classList.toggle("hidden", !info.canUp);
+  if(!info.canUp) return;
+  const modes = Object.entries(UP_MODES).filter(([m]) => m !== "hires" || (k === "image" && info.hires));
+  chips($("#upMode"), modes, upMode(), m => { state.up[k] = m; store.set("up", state.up); renderStudio(); });
+  const m = upMode(), opt = $("#upOpt"), hint = $("#upHint");
+  opt.classList.toggle("hidden", m === "off"); hint.innerHTML = "";
+  if(m === "hires"){
+    chips(opt, [[1.5, { n: "×1,5" }], [2, { n: "×2" }]], state.upScale, f => { state.upScale = f; store.set("upScale", f); renderStudio(); });
+    hint.textContent = T("Das Bild wird vergrößert und noch einmal kurz nachgerechnet – mehr Details, etwa doppelte Rechenzeit.");
+  }
+  if(m !== "seedvr2") return;
+  const rs = Object.entries(UP_RES).filter(([r]) => k === "image" || +r <= 1440);
+  if(!rs.find(([r]) => +r === +state.upRes[k])) state.upRes[k] = +rs[0][0];
+  chips(opt, rs.map(([r, n]) => [+r, { n, sub: r + "p" }]), +state.upRes[k], r => { state.upRes[k] = r; store.set("upRes", state.upRes); renderStudio(); });
+  const base = T(k === "video" ? "Das fertige Video wird danach mit SeedVR2 hochskaliert – im selben Auftrag." : "Das fertige Bild wird danach mit SeedVR2 hochskaliert – im selben Auftrag.");
+  if(onGpu){
+    const e = gpuSel();
+    hint.innerHTML = esc(base) + " " + esc(T("Läuft auf deiner Cloud-GPU mit (großes 7B-Modell, wird dort beim ersten Mal geladen).")) +
+      (e && e.needs_update ? `<br><b>${esc(T("Bitte die Cloud-GPU zuerst aktualisieren (⬆ oben) – erst dann ist SeedVR2 dabei."))}</b>` : "");
+    return;
+  }
+  const si = seedInfo[""];
+  if(!si){ hint.textContent = base; seedvrInfo("").then(() => { if(upMode() === "seedvr2") renderStudio(); }); return; }
+  if(si.ok && !seedDevice(si)){ hint.innerHTML = `<b>${esc(T("SeedVR2 braucht eine NVIDIA-Grafikkarte (oder einen Mac) – auf diesem PC geht es nicht. Tipp: auf der 🚀 Cloud-GPU erstellen."))}</b>`; return; }
+  if(si.ok){
+    const vram = (state.sys && state.sys.vram_total || 0) / 1073741824;
+    hint.textContent = base + " " + T("Beim ersten Mal lädt SeedVR2 sein Modell (ca. 4 GB).") + (vram && vram < 12 ? " " + T("Wenig Grafikspeicher: läuft im Sparmodus, dafür langsamer.") : "");
+    return;
+  }
+  hint.innerHTML = esc(T("SeedVR2 ist auf diesem PC noch nicht installiert.")) + ` <button class="btn" type="button" id="upInst">${esc(T("Jetzt installieren (einmalig)"))}</button> <span id="upInstTxt"></span>`;
+  $("#upInst").onclick = installSeedVR2;
+}
+async function installSeedVR2(){
+  const btn = $("#upInst"), say = t => { const el = $("#upInstTxt"); if(el) el.textContent = T(t); };
+  if(btn) btn.disabled = true;
+  const r = await api("/easy/upscale/install", {});
+  if(r.error){ say(r.error); if(btn) btn.disabled = false; return; }
+  for(;;){
+    await new Promise(res => setTimeout(res, 2000));
+    const st = await api("/easy/upscale/status");
+    if(st.error && !st.running && !st.done){ say(st.error); if($("#upInst")) $("#upInst").disabled = false; return; }
+    if(st.done) break;
+    say(st.status || "Installiere …");
+  }
+  delete seedInfo[""];
+  if(host && host.restartComfy){ toast("✅ " + esc(T("SeedVR2 installiert – ComfyUI startet neu …")), "ok", 8000); await host.restartComfy(); }
+  else toast("✅ " + esc(T("SeedVR2 installiert – bitte ComfyUI neu starten.")), "ok", 15000);
 }
 
 /* ================= Navigation ================= */
@@ -706,6 +852,7 @@ function renderStudio(){
   const batchOk = k === "image" && info.batch.length > 0;
   $("#batchBox").classList.toggle("hidden", !batchOk);
   if(batchOk) chips($("#batch"), [1, 2, 4].map(n => [n, { n: String(n) }]), state.batch, n => { state.batch = n; renderStudio(); });
+  renderUp(info);
   $("#negBox").classList.toggle("hidden", !info.neg);
   $("#enhRow").classList.toggle("hidden", !info.enh);
   $("#turboRow").classList.toggle("hidden", !info.turbo);
@@ -920,9 +1067,15 @@ async function generate(opts){
   // alles sofort festhalten – während die GPU startet, darf man schon das nächste Video vorbereiten
   const promptText = $("#prompt").value.trim(), units = workUnits(), est = estimate();
   const wf = buildPrompt({}, seed), imgs = info.images.map(im => [im, state.images[im.id]]);
+  const upSeed = upMode() === "seedvr2" ? { res: +state.upRes[k], video: k === "video", seed, B } : null;
   state.submitting[B] = (state.submitting[B] || 0) + 1; clearTimeout(autoPauseT[B]); autoPauseArmed.delete(B);
   try{
     if(B && !(await gpuPrepare(key, B))) return;
+    if(upSeed){
+      const si = await seedvrInfo(B, true);
+      if(!si.ok){ showMsg("err", si.ok === false ? (B ? "SeedVR2 fehlt auf der Cloud-GPU – bitte die Cloud-GPU aktualisieren (⬆) und danach erneut starten." : "SeedVR2 ist noch nicht installiert – unter „Hochskalieren“ auf „Jetzt installieren“ klicken.") : "SeedVR2 ist gerade nicht erreichbar."); return; }
+      if(!addSeedVR2(wf, si, upSeed)){ showMsg("err", seedDevice(si) ? "Hochskalieren: In dieser Vorlage wurde keine Bild-/Video-Ausgabe gefunden." : "SeedVR2 braucht eine NVIDIA-Grafikkarte (oder einen Mac) – auf diesem PC geht es nicht."); return; }
+    }
     const thumb = await makeThumb((imgs.find(([im, img]) => img && !img.audio) || [])[1]);
     let inputs, rpSeq, r, j;
     for(let attempt = 0; ; attempt++){

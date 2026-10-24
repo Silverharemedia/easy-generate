@@ -29,6 +29,7 @@ Updates installiert Easy Generate selbst (Einstellungen → „Nach Updates such
   - ☁️ **HuggingFace-Cloud** – kostenlose ZeroGPU-Spaces oder Bezahlung pro Video, ganz ohne Download.
 - ✨ **KI-Prompt-Helfer** – macht aus einer kurzen Idee (auch auf Deutsch) einen guten englischen Prompt; lokal über Ollama oder mit Claude. Sieht auf Wunsch auch das Startbild an.
 - ➕ **Weiter** – verlängert ein fertiges Video: das letzte Bild wird automatisch Startbild des nächsten Abschnitts (für Szenen über 20 Sekunden).
+- 🔍 **Hochskalieren (auf Wunsch)** – „2. Durchgang“ (Bild wird vergrößert und noch einmal nachgerechnet) oder **SeedVR2** für Bilder und Videos bis 4K. Läuft im selben Auftrag auf demselben Rechner – auf der Cloud-GPU schon eingebaut, am PC mit einem Klick installiert.
 - 🎲 **Varianten** – mehrere Versionen mit verschiedenen Seeds auf einmal, auf Wunsch verteilt auf alle GPUs.
 - 🧠 **Speicher-Warnung**, wenn ein Modell zu groß für PC-Arbeitsspeicher + Grafikkarte ist.
 - ⏱️ **Zeitschätzung** – lernt aus deinen bisherigen Erstellungen, wie lange ein Video ungefähr dauert.
