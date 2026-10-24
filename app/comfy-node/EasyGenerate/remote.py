@@ -26,7 +26,7 @@ SPACE_NAME = "eg-comfyui"
 MAX_SLOTS = 20
 # Nur erhoehen, wenn sich etwas aendert, das auf der Cloud-GPU selbst laufen muss
 # (dann wird dort ein Update angeboten). 2 = Fortschritt per /easy/progress.
-REMOTE_API = 5          # 3 = Schnellstart-Speicher (/data); 4 = Modelle beim Start auf die lokale Platte kopieren; 5 = Zeitlimit/Platzpruefung beim Kopieren
+REMOTE_API = 6          # 3 = Schnellstart-Speicher (/data); 4 = Modelle beim Start auf die lokale Platte kopieren; 5 = Zeitlimit/Platzpruefung beim Kopieren; 6 = SeedVR2 zum Hochskalieren
 BUCKET_NAME = "eg-models"
 
 DOCKERFILE = """FROM python:3.12-slim
@@ -39,6 +39,10 @@ WORKDIR /home/user
 RUN pip install --user torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 RUN git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git \\
     && pip install --user -r ComfyUI/requirements.txt && pip install --user psutil
+# SeedVR2 zum Hochskalieren (nur benutzt, wenn man es im Studio waehlt; torch bleibt unangetastet)
+RUN git clone --depth 1 --branch v2.5.23 https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git ComfyUI/custom_nodes/seedvr2_videoupscaler \\
+    && grep -viE '^(torch|torchvision|torchaudio)([<>=~! ]|$)' ComfyUI/custom_nodes/seedvr2_videoupscaler/requirements.txt > /tmp/seedvr2-req.txt \\
+    && pip install --user -r /tmp/seedvr2-req.txt
 COPY --chown=user EasyGenerate /home/user/ComfyUI/custom_nodes/EasyGenerate
 COPY --chown=user start.sh /home/user/start.sh
 EXPOSE 7860
